@@ -48,12 +48,8 @@ We recommend setting up a virtual environment using either [conda](https://docs.
 conda create -y -n depthsplat python=3.10
 conda activate depthsplat
 
-# or venv
-# python -m venv /path/to/venv/depthsplat
-# source /path/to/venv/depthsplat/bin/activate
-
 # installation
-pip install torch==2.4.0 torchvision==0.19.0 --index-url https://download.pytorch.org/whl/cu124
+pip install torch==2.4.0 torchvision==0.19.0 --index-url https://download.pytorch.org/whl/cu118
 pip install -r requirements.txt
 ```
 
@@ -150,7 +146,7 @@ https://github.com/user-attachments/assets/3f228a3f-8d54-4a90-9db4-ff0874150883
 ```
 # render video on re10k (need to have ffmpeg installed)
 CUDA_VISIBLE_DEVICES=0 python -m src.main +experiment=re10k \
-dataset.test_chunk_interval=100 \
+dataset.test_chunk_interval=1 \
 model.encoder.num_scales=2 \
 model.encoder.upsample_factor=2 \
 model.encoder.lowest_feature_resolution=4 \
@@ -160,7 +156,8 @@ mode=test \
 dataset/view_sampler=evaluation \
 dataset.view_sampler.index_path=assets/evaluation_index_re10k_video.json \
 test.save_video=true \
-test.compute_scores=false
+test.compute_scores=false \
+test.save_gaussian=true \
 output_dir=outputs/depthsplat-re10k
 ```
 
