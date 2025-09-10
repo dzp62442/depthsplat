@@ -41,6 +41,8 @@ Right: Unsupervised depth pre-training with Gaussian splatting leads to reduced 
 
 Our code is developed using PyTorch 2.4.0, CUDA 12.4, and Python 3.10. 
 
+> 使用 CUDA 11.8 进行复现，其他不变
+
 We recommend setting up a virtual environment using either [conda](https://docs.anaconda.com/miniconda/) or [venv](https://docs.python.org/3/library/venv.html) before installation:
 
 ```bash
@@ -50,6 +52,7 @@ conda activate depthsplat
 
 # installation
 pip install torch==2.4.0 torchvision==0.19.0 --index-url https://download.pytorch.org/whl/cu118
+pip install xformers==0.0.27.post2 --index-url https://download.pytorch.org/whl/cu118
 pip install -r requirements.txt
 ```
 
@@ -70,6 +73,12 @@ The camera extrinsic matrices follow the OpenCV convention for camera-to-world t
 
 For dataset preparation, please refer to [DATASETS.md](DATASETS.md).
 
+从 HuggingFace 下载 PixelSplat 格式的数据集：
+```bash
+pip install -U huggingface_hub
+export HF_ENDPOINT=https://hf-mirror.com  # 使用镜像源
+huggingface-cli download --repo-type dataset --resume-download yiren-lu/re10k_pixelsplat --local-dir ./re10k_pixelsplat/
+```
 
 
 ## Gaussian Splatting

@@ -1,4 +1,4 @@
-import os
+import os, sys
 from pathlib import Path
 import warnings
 import copy
@@ -149,6 +149,7 @@ def train(cfg_dict: DictConfig):
     )
     torch.manual_seed(cfg_dict.seed + trainer.global_rank)
 
+    # 模型组件初始化
     encoder, encoder_visualizer = get_encoder(cfg.model.encoder)
 
     model_wrapper = ModelWrapper(
@@ -164,6 +165,11 @@ def train(cfg_dict: DictConfig):
             None if eval_cfg is None else eval_cfg.dataset
         ),
     )
+
+    # 数据模块初始化
+    print(cyan("Init Data Module"))
+    print(cfg.dataset)
+    print(cfg.data_loader)
     data_module = DataModule(
         cfg.dataset,
         cfg.data_loader,
@@ -176,6 +182,7 @@ def train(cfg_dict: DictConfig):
         print("val:", len(data_module.val_dataloader()))
         print("test:", len(data_module.test_dataloader()))
 
+    # 加载模型并训练/测试
     strict_load = not cfg.checkpointing.no_strict_load
 
     if cfg.mode == "train":
