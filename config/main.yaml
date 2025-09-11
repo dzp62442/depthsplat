@@ -7,8 +7,7 @@ defaults:
 
 wandb:
   project: depthsplat
-  entity: placeholder
-  name: placeholder
+  entity: dzp62442-DROPS
   mode: online
   id: null
 
