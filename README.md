@@ -14,6 +14,36 @@ output_dir=checkpoints/omniscene-112x200-depthsplat-small \
 checkpointing.resume=true wandb.id=WANDB_ID  # 仅在恢复训练时使用
 ```
 
+- base model
+```bash
+python -m src.main +experiment=omniscene_112x200 \
+data_loader.train.batch_size=1 \
+trainer.max_steps=100000 \
+model.encoder.num_scales=2 \
+model.encoder.upsample_factor=2 \
+model.encoder.lowest_feature_resolution=4 \
+model.encoder.monodepth_vit_type=vitb \
+checkpointing.pretrained_monodepth=pretrained/depth_anything_v2_vitb.pth \
+checkpointing.pretrained_mvdepth=pretrained/gmflow-scale1-things-e9887eda.pth \
+output_dir=checkpoints/omniscene-112x200-depthsplat-base \
+checkpointing.resume=true wandb.id=WANDB_ID  # 仅在恢复训练时使用
+```
+
+- large model
+```bash
+python -m src.main +experiment=omniscene_112x200 \
+data_loader.train.batch_size=1 \
+trainer.max_steps=100000 \
+model.encoder.num_scales=2 \
+model.encoder.upsample_factor=2 \
+model.encoder.lowest_feature_resolution=4 \
+model.encoder.monodepth_vit_type=vitl \
+checkpointing.pretrained_monodepth=pretrained/depth_anything_v2_vitl.pth \
+checkpointing.pretrained_mvdepth=pretrained/gmflow-scale1-things-e9887eda.pth \
+output_dir=checkpoints/omniscene-112x200-depthsplat-large \
+checkpointing.resume=true wandb.id=WANDB_ID  # 仅在恢复训练时使用
+```
+
 - 训练中止后杀死 wandb 上传进程
 ```bash
 ps aux|grep wandb|grep -v grep | awk '{print $2}'|xargs kill -9
@@ -28,6 +58,30 @@ model.encoder.upsample_factor=4 \
 model.encoder.lowest_feature_resolution=4 \
 checkpointing.pretrained_model=checkpoints/omniscene-112x200-depthsplat-small/checkpoints/epoch_0-step_100000.ckpt \
 output_dir=outputs/depthsplat-omniscene-112x200-small \
+```
+
+- base model
+```bash
+python -m src.main +experiment=omniscene_112x200 \
+mode=test \
+model.encoder.num_scales=2 \
+model.encoder.upsample_factor=2 \
+model.encoder.lowest_feature_resolution=4 \
+model.encoder.monodepth_vit_type=vitb \
+checkpointing.pretrained_model=checkpoints/omniscene-112x200-depthsplat-base/checkpoints/epoch_0-step_100000.ckpt \
+output_dir=outputs/depthsplat-omniscene-112x200-base \
+```
+
+- large model
+```bash
+python -m src.main +experiment=omniscene_112x200 \
+mode=test \
+model.encoder.num_scales=2 \
+model.encoder.upsample_factor=2 \
+model.encoder.lowest_feature_resolution=4 \
+model.encoder.monodepth_vit_type=vitl \
+checkpointing.pretrained_model=checkpoints/omniscene-112x200-depthsplat-large/checkpoints/epoch_0-step_100000.ckpt \
+output_dir=outputs/depthsplat-omniscene-112x200-large \
 ```
 
 - 保存可视化结果
