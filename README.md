@@ -1,3 +1,17 @@
+在 OmniScene 数据集上与 SVF-GS 进行对比
+
+- 训练
+```bash
+
+```
+
+- 测试
+```bash
+
+```
+
+---
+
 <p align="center">
   <h1 align="center">DepthSplat: Connecting Gaussian Splatting and Depth</h1>
   <p align="center">
