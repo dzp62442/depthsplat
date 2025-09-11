@@ -12,6 +12,11 @@
 
 ---
 
+- 训练中止后杀死 wandb 上传进程
+```bash
+ps aux|grep wandb|grep -v grep | awk '{print $2}'|xargs kill -9
+```
+
 <p align="center">
   <h1 align="center">DepthSplat: Connecting Gaussian Splatting and Depth</h1>
   <p align="center">
