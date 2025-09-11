@@ -113,6 +113,8 @@ def load_conditions(img_paths, reso, is_input=False, load_rel_depth=False):
         img = Image.open(img_path)
         h, w = img.height, img.width
         img, ck, resize_flag = maybe_resize(img, reso, ck)
+        ck[0, :] = ck[0, :] / reso[1]  # 第一行除以图像宽度
+        ck[1, :] = ck[1, :] / reso[0]  # 第二行除以图像高度
         img = HWC3(img)
         imgs.append(img)
         cks.append(ck)

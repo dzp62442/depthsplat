@@ -24,6 +24,7 @@ from typing import Literal, Optional
 from dataclasses import dataclass
 from .types import Stage
 from .dataset import DatasetCfgCommon
+from .view_sampler import ViewSampler
 
 cv2.setNumThreads(0) 
 cv2.ocl.setUseOpenCL(False)
@@ -115,7 +116,8 @@ class DatasetOmniSceneCfg(DatasetCfgCommon):
 class DatasetOmniScene(Dataset):
     cfg: DatasetOmniSceneCfg
     stage: Stage
-    data_root: str = "data/nuScenes"
+    view_sampler: ViewSampler
+
     data_version: str = "interp_12Hz_trainval"
     #data_version: str = "v1.0-trainval"
     dataset_prefix: str = "/datasets/nuScenes"
@@ -140,57 +142,39 @@ class DatasetOmniScene(Dataset):
 
     def __init__(
         self,
-        dataset_cfg,
-        resolution: list = [224, 400],
-        split: str = "train",
+        cfg: DatasetOmniSceneCfg,
+        stage: Stage,
+        view_sampler: ViewSampler,
         load_rel_depth: bool = False  # 仅在 evaluate.py 中加载相对深度，用于计算 PCC 指标
     ):
-        
         super().__init__()
+        self.cfg = cfg
+        self.stage = stage
+        self.view_sampler = view_sampler
+        if cfg.near != -1:
+            self.near = cfg.near
+        if cfg.far != -1:
+            self.far = cfg.far
 
-        self.reso = resolution
-        self.load_rel_depth = load_rel_depth
-        self.centric_mode = dataset_cfg.centric_mode
-        self.use_center = dataset_cfg.use_center
-        self.use_first = dataset_cfg.use_first
-        self.use_last = dataset_cfg.use_last
-        self.only_input = dataset_cfg.only_input
-        if split == "train":
-            self.random_sample_output = dataset_cfg.random_sample_output  # random_sample_output 参数仅对 train 生效
-        else:
-            self.random_sample_output = 12
-        assert self.random_sample_output >= 1 and self.random_sample_output <= 12, "random_sample_output must be between 1 and 12"
+        self.reso = cfg.image_shape
+        self.data_root = str(cfg.roots[0])
+        self.load_rel_depth = load_rel_depth        
         
         # load bin tokens
-        if self.centric_mode == "ego":  # 以自车为中心，前馈式，在训练集上训练、测试集上测试
-            if split == "train":
-                #for training
-                self.bin_tokens = json.load(open(osp.join(self.data_root, self.data_version, "bins_train_3.2m.json")))["bins"]
-            elif split == "val":
-                # for visualization during training
-                self.bin_tokens = json.load(open(osp.join(self.data_root, self.data_version, "bins_val_3.2m.json")))["bins"]
-                self.bin_tokens = self.bin_tokens[:30000:3000][:10]  # 前 30000 个 bin tokens 中每隔 3000 个取一个，取 10 个
-            elif split == "test":
-                # for evaluation
-                self.bin_tokens = json.load(open(osp.join(self.data_root, self.data_version, "bins_val_3.2m.json")))["bins"]
-            elif split == "mini-test":
-                # for evaluation mini test
-                self.bin_tokens = json.load(open(osp.join(self.data_root, self.data_version, "bins_val_3.2m.json")))["bins"]
-                self.bin_tokens = self.bin_tokens[0::14][:2048]  # 每隔 14 个取一个，取 2048 个
-            elif split == "demo":
-                # super mini test
-                self.bin_tokens = bins_dynamic_demo
-        elif self.centric_mode == "scene":  # 以场景为中心，在一个场景上反复迭代优化
-            self.bin_tokens = [bins_dynamic_demo[0]]
-        else:
-            raise NotImplementedError("Invalid centric mode: {}".format(self.centric_mode))
-        
-        with open(osp.join(self.data_root, 'scene_mapping.pkl'), 'rb') as f:
-            scene_mappings = pkl.load(f)
-            self.scene_token_to_name = scene_mappings['token_to_name']
-            self.scene_name_to_token = scene_mappings['name_to_token']
-        
-        self.split = split
+        if stage == "train":
+            #for training
+            self.bin_tokens = json.load(open(osp.join(self.data_root, self.data_version, "bins_train_3.2m.json")))["bins"]
+        elif stage == "val":
+            # for visualization during training
+            self.bin_tokens = json.load(open(osp.join(self.data_root, self.data_version, "bins_val_3.2m.json")))["bins"]
+            self.bin_tokens = self.bin_tokens[:30000:3000][:10]  # 前 30000 个 bin tokens 中每隔 3000 个取一个，取 10 个
+        elif stage == "test":
+            # for evaluation
+            self.bin_tokens = json.load(open(osp.join(self.data_root, self.data_version, "bins_val_3.2m.json")))["bins"]
+            self.bin_tokens = self.bin_tokens[0::14][:2048]  # 每隔 14 个取一个，取 2048 个
+        elif stage == "demo":
+            # super mini test
+            self.bin_tokens = bins_dynamic_demo
         
     def __len__(self):
         return len(self.bin_tokens)
@@ -202,176 +186,70 @@ class DatasetOmniScene(Dataset):
             bin_info = pkl.load(f)
 
         sensor_info_center = {sensor: bin_info["sensor_info"][sensor][0] for sensor in self.camera_types + ["LIDAR_TOP"]}
-        sensor_info_first = {sensor: bin_info["sensor_info"][sensor][1] for sensor in self.camera_types_first + ["LIDAR_TOP"]}
-        sensor_info_last = {sensor: bin_info["sensor_info"][sensor][2] for sensor in self.camera_types_last + ["LIDAR_TOP"]}
 
         # =================== Input views of this bin ===================== #
         input_img_paths, input_c2ws, input_w2cs = [], [], []
-        if self.use_center:
-            for cam in self.camera_types:
-                info = copy.deepcopy(sensor_info_center[cam])
-                img_path, c2w, w2c = load_info(info)
-                img_path = img_path.replace(self.dataset_prefix, self.data_root)
-                input_img_paths.append(img_path)
-                input_c2ws.append(c2w)
-                input_w2cs.append(w2c)
-        if self.use_first:
-            for cam in self.camera_types_first:
-                info = copy.deepcopy(sensor_info_first[cam])
-                img_path, c2w, w2c = load_info(info)
-                img_path = img_path.replace(self.dataset_prefix, self.data_root)
-                input_img_paths.append(img_path)
-                input_c2ws.append(c2w)
-                input_w2cs.append(w2c)
-        if self.use_last:
-            for cam in self.camera_types_last:
-                info = copy.deepcopy(sensor_info_last[cam])
-                img_path, c2w, w2c = load_info(info)
-                img_path = img_path.replace(self.dataset_prefix, self.data_root)
-                input_img_paths.append(img_path)
-                input_c2ws.append(c2w)
-                input_w2cs.append(w2c)
+        for cam in self.camera_types:
+            info = copy.deepcopy(sensor_info_center[cam])
+            img_path, c2w, w2c = load_info(info)
+            img_path = img_path.replace(self.dataset_prefix, self.data_root)
+            input_img_paths.append(img_path)
+            input_c2ws.append(c2w)
         input_c2ws = torch.as_tensor(input_c2ws, dtype=torch.float32)
-        input_w2cs = torch.as_tensor(input_w2cs, dtype=torch.float32)
-                
+              
         # load and modify images (cropped or resized if necessary), and modify intrinsics accordingly
         input_imgs, input_depths, input_depths_m, input_confs_m, input_masks, input_cks = \
                     load_conditions(input_img_paths, self.reso, is_input=True, load_rel_depth=self.load_rel_depth)
         input_cks = torch.as_tensor(input_cks, dtype=torch.float32)
-        
-        input_fxs, input_fys, input_cxs, input_cys = input_cks[:, 0, 0], input_cks[:, 1, 1], input_cks[:, 0, 2], input_cks[:, 1, 2]
-        
-        # compute image fovs and pixel directions
-        input_fovxs, input_fovys = [], []
-        input_directions = []
-        for fx, fy, cx, cy in zip(input_fxs, input_fys, input_cxs, input_cys):
-            direction = get_ray_directions(self.reso[0], self.reso[1],
-                                           focal=[fx, fy], principal=[cx, cy])
-            fovx = 2 * np.arctan(cx / fx)
-            fovy = 2 * np.arctan(cy / fy)
-            input_fovxs.append(fovx)
-            input_fovys.append(fovy)
-            input_directions.append(direction)
-        input_fovxs = torch.as_tensor(input_fovxs, dtype=torch.float32)
-        input_fovys = torch.as_tensor(input_fovys, dtype=torch.float32)
-
-        input_directions = torch.stack(input_directions)
-        input_rays_o, input_rays_d = get_rays(
-            input_directions, input_c2ws, keepdim=True, normalize=False)
-        
-        # prepare w2i for volume-gs
-        input_w2is = []
-        for w2c, ck in zip(input_w2cs, input_cks):
-            viewpad = torch.eye(4)
-            viewpad[:ck.shape[0], :ck.shape[1]] = ck  # 创建齐次内参矩阵
-            w2i = (viewpad @ w2c.T)
-            input_w2is.append(w2i)
-        input_w2is = torch.stack(input_w2is)
 
         # ======= Render views from non-key frames for rendering losses ====== #
-        if self.only_input:  # 输出图像仅含输入图像
-            output_img_paths = []
-            output_imgs = input_imgs
-            output_depths = input_depths
-            output_depths_m = input_depths_m
-            output_confs_m = input_confs_m
-            output_masks = input_masks
-            output_c2ws = input_c2ws
-            output_fovxs = input_fovxs
-            output_fovys = input_fovys
-            output_fxs = input_fxs
-            output_fys = input_fys
-            output_cxs = input_cxs
-            output_cys = input_cys
+        output_img_paths, output_c2ws, output_w2cs = [], [], []
 
-        else:  # 输出图像含区间起点终点图像和输入图像
-            output_img_paths, output_c2ws, output_w2cs = [], [], []
-
-            frame_num = len(bin_info["sensor_info"]["LIDAR_TOP"])
-            assert frame_num >= 3, "only got {} frames for bin{}".format(frame_num, bin_token)
-            if self.use_center:
-                rend_indices = [[1, 2]] * 6
-            else:
-                rend_indices = [[0]] * 6
-            
-            for cam_id, cam in enumerate(self.camera_types):
-                indices = rend_indices[cam_id]
-                for ind in indices:
-                    info = copy.deepcopy(bin_info["sensor_info"][cam][ind])
-                    img_path, c2w, w2c = load_info(info)
-                    img_path = img_path.replace(self.dataset_prefix, self.data_root)
-                    output_img_paths.append(img_path)
-                    output_c2ws.append(c2w)
-                    output_w2cs.append(w2c)
-            
-            # 从区间起点和终点共 12 张输出图像中随机采样若干张用于训练
-            if self.random_sample_output < 12:
-                random_sample_output_ids = random.sample(range(len(output_img_paths)), self.random_sample_output)
-                output_img_paths = [output_img_paths[i] for i in random_sample_output_ids]
-                output_c2ws = [output_c2ws[i] for i in random_sample_output_ids]
-                output_w2cs = [output_w2cs[i] for i in random_sample_output_ids]
-            output_c2ws = torch.as_tensor(output_c2ws, dtype=torch.float32)
-            
-            # load and modify images (cropped or resized if necessary), and modify intrinsics accordingly
-            output_imgs, output_depths, output_depths_m, output_confs_m, output_masks, output_cks = \
-                        load_conditions(output_img_paths, self.reso, is_input=False, load_rel_depth=self.load_rel_depth)
-            output_fxs, output_fys, output_cxs, output_cys = output_cks[:, 0, 0], output_cks[:, 1, 1], output_cks[:, 0, 2], output_cks[:, 1, 2]
-            
-            # compute image fovs and pixel directions
-            output_fovxs, output_fovys = [], []
-            for fx, fy, cx, cy in zip(output_fxs, output_fys, output_cxs, output_cys):
-                fovx = 2 * np.arctan(cx / fx)
-                fovy = 2 * np.arctan(cy / fy)
-                output_fovxs.append(fovx)
-                output_fovys.append(fovy)
-            output_fovxs = torch.as_tensor(output_fovxs, dtype=torch.float32)
-            output_fovys = torch.as_tensor(output_fovys, dtype=torch.float32)
-
-            # add input data to output
-            output_imgs = torch.cat([output_imgs, input_imgs], dim=0)
-            output_depths = torch.cat([output_depths, input_depths], dim=0)
-            output_depths_m = torch.cat([output_depths_m, input_depths_m], dim=0)
-            output_confs_m = torch.cat([output_confs_m, input_confs_m], dim=0)
-            output_masks = torch.cat([output_masks, input_masks], dim=0)
-            output_c2ws = torch.cat([output_c2ws, input_c2ws], dim=0)
-            output_fovxs = torch.cat([output_fovxs, input_fovxs], dim=0)
-            output_fovys = torch.cat([output_fovys, input_fovys], dim=0)
-            output_fxs = torch.cat([output_fxs, input_fxs], dim=0)
-            output_fys = torch.cat([output_fys, input_fys], dim=0)
-            output_cxs = torch.cat([output_cxs, input_cxs], dim=0)
-            output_cys = torch.cat([output_cys, input_cys], dim=0)
+        frame_num = len(bin_info["sensor_info"]["LIDAR_TOP"])
+        assert frame_num >= 3, "only got {} frames for bin{}".format(frame_num, bin_token)
+        rend_indices = [[1, 2]] * 6
         
-        output_directions = []
-        for fx, fy, cx, cy in zip(output_fxs, output_fys, output_cxs, output_cys):
-            fovx = 2 * np.arctan(cx / fx)
-            fovy = 2 * np.arctan(cy / fy)
-            direction = get_ray_directions(self.reso[0], self.reso[1],
-                                           focal=[fx, fy], principal=[cx, cy])
-            output_directions.append(direction)
-        output_directions = torch.stack(output_directions)
-        output_rays_o, output_rays_d = get_rays(
-                    output_directions, output_c2ws, keepdim=True, normalize=False)
+        for cam_id, cam in enumerate(self.camera_types):
+            indices = rend_indices[cam_id]
+            for ind in indices:
+                info = copy.deepcopy(bin_info["sensor_info"][cam][ind])
+                img_path, c2w, w2c = load_info(info)
+                img_path = img_path.replace(self.dataset_prefix, self.data_root)
+                output_img_paths.append(img_path)
+                output_c2ws.append(c2w)
+        output_c2ws = torch.as_tensor(output_c2ws, dtype=torch.float32)
         
+        # load and modify images (cropped or resized if necessary), and modify intrinsics accordingly
+        output_imgs, output_depths, output_depths_m, output_confs_m, output_masks, output_cks = \
+                    load_conditions(output_img_paths, self.reso, is_input=False, load_rel_depth=self.load_rel_depth)
+        output_cks = torch.as_tensor(output_cks, dtype=torch.float32)
+
+        # add input data to output
+        output_imgs = torch.cat([output_imgs, input_imgs], dim=0)
+        output_c2ws = torch.cat([output_c2ws, input_c2ws], dim=0)
+        output_cks = torch.cat([output_cks, input_cks], dim=0)
 
         # pack data
-        input_dict = {"rgb": input_imgs, "input_img_paths": input_img_paths}
+        context = {
+            "extrinsics": input_c2ws,
+            "intrinsics": input_cks,
+            "image": input_imgs,
+            "near": repeat(torch.tensor(self.near, dtype=torch.float32), "-> v", v=len(input_c2ws)),
+            "far": repeat(torch.tensor(self.far, dtype=torch.float32), "-> v", v=len(input_c2ws)),
+            "index": torch.arange(len(input_c2ws)),
+        }
 
-        input_dict_pix = {"depth_m": input_depths_m, "conf_m": input_confs_m,
-                          "ck": input_cks, "c2w": input_c2ws,
-                          "cx": input_cxs, "cy": input_cys, "fx": input_fxs, "fy": input_fys,
-                          "rays_o": input_rays_o, "rays_d": input_rays_d}
-        
-        input_dict_vol = {"w2i": input_w2is}
-
-        output_dict = {"rgb": output_imgs, "depth": output_depths, "output_img_paths": output_img_paths,
-                       "depth_m": output_depths_m, "conf_m": output_confs_m, "mask": output_masks,
-                       "c2w": output_c2ws, "fovx": output_fovxs, "fovy": output_fovys,
-                       "rays_o": output_rays_o, "rays_d": output_rays_d}
+        target = {
+            "extrinsics": output_c2ws,
+            "intrinsics": output_cks,
+            "image": output_imgs,
+            "near": repeat(torch.tensor(self.near, dtype=torch.float32), "-> v", v=len(output_c2ws)),
+            "far": repeat(torch.tensor(self.far, dtype=torch.float32), "-> v", v=len(output_c2ws)),
+            "index": torch.arange(len(output_c2ws)),
+        }
 
         return {
-            "bin_token": bin_token,
-            "outputs": output_dict,
-            "inputs": input_dict,
-            "inputs_pix": input_dict_pix,
-            "inputs_vol": input_dict_vol
+            "context": context,
+            "target": target,
+            "scene": bin_token,
         }
