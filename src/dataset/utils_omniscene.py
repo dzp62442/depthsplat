@@ -119,66 +119,10 @@ def load_conditions(img_paths, reso, is_input=False, load_rel_depth=False):
         imgs.append(img)
         cks.append(ck)
 
-        # relative depth from DepthAnything-v2
-        if load_rel_depth:
-            depth_path = img_path.replace("sweeps_small", "sweeps_dpt_small")
-            depth_path = depth_path.replace("samples_small", "samples_dpt_small")
-            depth_path = depth_path.replace(".jpg", ".npy")
-            disp = np.load(depth_path).astype(np.float32)
-            if resize_flag:
-                disp = Image.fromarray(disp)
-                disp = disp.resize((reso[1], reso[0]), Image.BILINEAR)
-                disp = np.array(disp)
-            # inverse disparity to relative depth
-            # clamping the farthest depth to 50x of the nearest
-            range = np.minimum(disp.max() / (disp.min() + 0.001), 50.0)
-            max = disp.max()
-            min = max / range
-            depth = 1 / np.maximum(disp, min)
-            depth = (depth - depth.min()) / (depth.max() - depth.min())
-            depths.append(depth)
-        else:
-            depths.append(False)
-        
-        # metric depth from Metric3D-v2
-        depthm_path = img_path.replace("sweeps_small", "sweeps_dptm_small")
-        depthm_path = depthm_path.replace("samples_small", "samples_dptm_small")
-        depthm_path = depthm_path.replace(".jpg", "_dpt.npy")
-        conf_path = depthm_path.replace("_dpt.npy", "_conf.npy")
-        dptm = np.load(depthm_path).astype(np.float32)
-        conf = np.load(conf_path).astype(np.float32)
-        if resize_flag:
-            dptm = Image.fromarray(dptm)
-            dptm = dptm.resize((reso[1], reso[0]), Image.BILINEAR)
-            dptm = np.array(dptm)
-            conf = Image.fromarray(conf)
-            conf = conf.resize((reso[1], reso[0]), Image.BILINEAR)
-            conf = np.array(conf)
-        depths_m.append(dptm)
-        confs_m.append(conf)
-
-        # 动态物体掩码
-        if is_input:  # 输入图像使用全白掩码
-            mask = np.ones(tuple(reso), dtype=np.float32)
-        else:  # 输出图像读取真实掩码
-            mask_path = img_path.replace("sweeps_small", "sweeps_mask_small")
-            mask_path = mask_path.replace("samples_small", "samples_mask_small")
-            mask_path = mask_path.replace(".jpg", ".png")
-            mask = Image.open(mask_path).convert('L')  # convert to grayscale
-            if resize_flag:
-                mask = mask.resize((reso[1], reso[0]), Image.BILINEAR)
-            mask = np.array(mask).astype(np.float32)
-            mask = mask / 255.0
-        masks.append(mask)
-
     imgs = torch.from_numpy(np.stack(imgs, axis=0)).permute(0, 3, 1, 2).float() / 255.0  # [v c h w]
-    depths = torch.from_numpy(np.stack(depths, axis=0)).float()  # [v h w]
-    depths_m = torch.from_numpy(np.stack(depths_m, axis=0)).float()  # [v h w]
-    confs_m = torch.from_numpy(np.stack(confs_m, axis=0)).float()  # [v h w]
-    masks = torch.from_numpy(np.stack(masks, axis=0)).float()  # [v h w]
     cks = torch.as_tensor(cks, dtype=torch.float32)
 
-    return imgs, depths, depths_m, confs_m, masks, cks
+    return imgs, cks
 
 def get_ray_directions(
     H: int,

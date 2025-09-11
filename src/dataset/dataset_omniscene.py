@@ -198,8 +198,7 @@ class DatasetOmniScene(Dataset):
         input_c2ws = torch.as_tensor(input_c2ws, dtype=torch.float32)
               
         # load and modify images (cropped or resized if necessary), and modify intrinsics accordingly
-        input_imgs, input_depths, input_depths_m, input_confs_m, input_masks, input_cks = \
-                    load_conditions(input_img_paths, self.reso, is_input=True, load_rel_depth=self.load_rel_depth)
+        input_imgs, input_cks = load_conditions(input_img_paths, self.reso, is_input=True, load_rel_depth=self.load_rel_depth)
         input_cks = torch.as_tensor(input_cks, dtype=torch.float32)
 
         # ======= Render views from non-key frames for rendering losses ====== #
@@ -220,8 +219,7 @@ class DatasetOmniScene(Dataset):
         output_c2ws = torch.as_tensor(output_c2ws, dtype=torch.float32)
         
         # load and modify images (cropped or resized if necessary), and modify intrinsics accordingly
-        output_imgs, output_depths, output_depths_m, output_confs_m, output_masks, output_cks = \
-                    load_conditions(output_img_paths, self.reso, is_input=False, load_rel_depth=self.load_rel_depth)
+        output_imgs, output_cks = load_conditions(output_img_paths, self.reso, is_input=False, load_rel_depth=self.load_rel_depth)
         output_cks = torch.as_tensor(output_cks, dtype=torch.float32)
 
         # add input data to output
