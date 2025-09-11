@@ -1,0 +1,14 @@
+{
+    "search.exclude": {
+      
+    },
+    "files.watcherExclude": {
+        "datasets": true,
+    },
+    "cursorpyright.analysis.exclude": [
+        "datasets",
+    ],
+    "cursorpyright.analysis.extraPaths": [
+        "${env:HOME}/Libraries"
+    ]
+  }
