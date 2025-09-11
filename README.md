@@ -1,6 +1,7 @@
 在 OmniScene 数据集上与 SVF-GS 进行对比
 
-- 训练
+### 训练
+- small model
 ```bash
 python -m src.main +experiment=omniscene_112x200 \
 data_loader.train.batch_size=1 \
@@ -13,17 +14,32 @@ output_dir=checkpoints/omniscene-112x200-depthsplat-small \
 checkpointing.resume=true wandb.id=WANDB_ID  # 仅在恢复训练时使用
 ```
 
-- 测试
-```bash
-
-```
-
----
-
 - 训练中止后杀死 wandb 上传进程
 ```bash
 ps aux|grep wandb|grep -v grep | awk '{print $2}'|xargs kill -9
 ```
+
+### 测试
+- small model
+```bash
+python -m src.main +experiment=omniscene_112x200 \
+mode=test \
+model.encoder.upsample_factor=4 \
+model.encoder.lowest_feature_resolution=4 \
+checkpointing.pretrained_model=checkpoints/omniscene-112x200-depthsplat-small/checkpoints/epoch_0-step_100000.ckpt \
+output_dir=outputs/depthsplat-omniscene-112x200-small \
+```
+
+- 保存可视化结果
+```bash
+test.save_image=true \
+test.save_gt_image=true \
+test.save_depth=true \
+test.save_gaussian=true \
+test.save_video=true
+```
+
+---
 
 <p align="center">
   <h1 align="center">DepthSplat: Connecting Gaussian Splatting and Depth</h1>

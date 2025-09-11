@@ -59,15 +59,15 @@ def HWC3(x):
         y = y.clip(0, 255).astype(np.uint8)
         return y
 
-def load_info(info):
+def load_info(info):  # TODO: 似乎不应该再 flip_yz
     img_path = info["data_path"]
     # use lidar coordinate of the key frame as the world coordinate
     c2w = info["sensor2lidar_transform"]
     # opencv cam -> opengl cam, maybe not necessary!
-    flip_yz = np.eye(4)
-    flip_yz[1, 1] = -1
-    flip_yz[2, 2] = -1
-    c2w = c2w@flip_yz
+    # flip_yz = np.eye(4)
+    # flip_yz[1, 1] = -1
+    # flip_yz[2, 2] = -1
+    # c2w = c2w@flip_yz
 
     lidar2cam_r = np.linalg.inv(info["sensor2lidar_rotation"])
     lidar2cam_t = info["sensor2lidar_translation"] @ lidar2cam_r.T
