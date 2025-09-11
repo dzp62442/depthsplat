@@ -2,7 +2,15 @@
 
 - 训练
 ```bash
-
+python -m src.main +experiment=omniscene_112x200 \
+data_loader.train.batch_size=1 \
+trainer.max_steps=100000 \
+model.encoder.upsample_factor=4 \
+model.encoder.lowest_feature_resolution=4 \
+checkpointing.pretrained_monodepth=pretrained/depth_anything_v2_vits.pth \
+checkpointing.pretrained_mvdepth=pretrained/gmflow-scale1-things-e9887eda.pth \
+output_dir=checkpoints/omniscene-112x200-depthsplat-small \
+checkpointing.resume=true wandb.id=WANDB_ID  # 仅在恢复训练时使用
 ```
 
 - 测试

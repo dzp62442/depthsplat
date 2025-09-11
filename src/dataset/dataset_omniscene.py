@@ -20,10 +20,16 @@ import copy
 from io import BytesIO
 from einops import rearrange, repeat, einsum
 
+from typing import Literal, Optional
+from dataclasses import dataclass
+from .types import Stage
+from .dataset import DatasetCfgCommon
+
 cv2.setNumThreads(0) 
 cv2.ocl.setUseOpenCL(False)
 
-from model.utils.ops import get_ray_directions, get_rays
+from .utils_omniscene import get_ray_directions, get_rays
+from .utils_omniscene import load_info, load_conditions
 
 bins_demo = ['scenee7ef871f77f44331aefdebc24ec034b7_bin010',
 'scenee7ef871f77f44331aefdebc24ec034b7_bin200',
@@ -89,8 +95,26 @@ bins_dynamic_demo = ['scenee7ef871f77f44331aefdebc24ec034b7_bin010',
 'scene50ff554b3ecb4d208849d042b7643715_bin000'
 ]
 
-from .transforms.loading import load_info, load_conditions, get_occ_meshgrid, align_occ_coordinate
-class nuScenesDataset(Dataset):
+@dataclass
+class DatasetOmniSceneCfg(DatasetCfgCommon):
+    name: Literal["omniscene"]
+    roots: list[Path]
+    baseline_epsilon: float
+    max_fov: float
+    make_baseline_1: bool
+    augment: bool
+    test_len: int
+    skip_bad_shape: bool = True
+    near: float = -1.0
+    far: float = -1.0
+    baseline_scale_bounds: bool = True
+    shuffle_val: bool = True
+    train_times_per_scene: int = 1
+    highres: bool = False
+
+class DatasetOmniScene(Dataset):
+    cfg: DatasetOmniSceneCfg
+    stage: Stage
     data_root: str = "data/nuScenes"
     data_version: str = "interp_12Hz_trainval"
     #data_version: str = "v1.0-trainval"
@@ -137,15 +161,6 @@ class nuScenesDataset(Dataset):
             self.random_sample_output = 12
         assert self.random_sample_output >= 1 and self.random_sample_output <= 12, "random_sample_output must be between 1 and 12"
         
-        self.occ_dataset_type = dataset_cfg.occ_dataset_type
-        self.occ_volume_size = dataset_cfg.occ_volume_size
-        self.occ_range = dataset_cfg.occ_range
-        self.occ_voxel_size = dataset_cfg.occ_voxel_size
-        if self.occ_dataset_type == "SurroundOcc": 
-            with open(osp.join(self.data_root, 'sample_mapping.pkl'), 'rb') as f:
-                sample_mappings = pkl.load(f)
-                self.sample_token_to_lidar_filename = sample_mappings['sample_token_to_lidar_filename']
-        
         # load bin tokens
         if self.centric_mode == "ego":  # 以自车为中心，前馈式，在训练集上训练、测试集上测试
             if split == "train":
@@ -176,10 +191,6 @@ class nuScenesDataset(Dataset):
             self.scene_name_to_token = scene_mappings['name_to_token']
         
         self.split = split
-
-        # 初始化 occ 3D 网格坐标
-        xyz = get_occ_meshgrid(self.occ_range, self.occ_volume_size, self.occ_voxel_size)
-        self.xyz = np.concatenate([xyz, np.ones_like(xyz[..., :1])], axis=-1) # x, y, z, 4
         
     def __len__(self):
         return len(self.bin_tokens)
@@ -340,57 +351,6 @@ class nuScenesDataset(Dataset):
         output_directions = torch.stack(output_directions)
         output_rays_o, output_rays_d = get_rays(
                     output_directions, output_c2ws, keepdim=True, normalize=False)
-
-        # =================== Occupancy gts of this bin ===================== #
-        scene_token = bin_info["scene_token"]
-        scene_name = self.scene_token_to_name[scene_token]
-        sample_token = bin_info['sensor_info']["LIDAR_TOP"][0]['sample_token']
-        sample_token = sample_token[:32]  # 对于 sweeps 数据，Omni-Scene 疑似在对应的 sample 的 token 后面添加了数字 1~5，此时读取对应的 sample 的标注        
-
-        # 生成 xyz 坐标
-        xyz = self.xyz.copy()  # x, y, z, 4
-        if getattr(self, "perturb", False):  # TODO: 添加高斯扰动，尚未接入
-            # xyz[..., :3] = xyz[..., :3] + (np.random.rand(*xyz.shape[:-1], 3) - 0.5) * (0.5 - 1e-3)
-            norm_distribution = np.clip(np.random.randn(*xyz.shape[:-1], 3) / 6, -0.5, 0.5)
-            xyz[..., :3] = xyz[..., :3] + norm_distribution * 0.49
-        
-        if self.occ_dataset_type == "Occ3D":  #! Occ3D-nuScenes 数据集，使用 ego 坐标系
-            occ_gt_file = osp.join(self.data_root, "occ_gts", self.occ_dataset_type, scene_name, sample_token, "labels.npz")
-            if not osp.exists(occ_gt_file):
-                raise FileNotFoundError(f"Occ GT file {occ_gt_file} does not exist !")
-
-            # 读取 occ 标注文件
-            occ_gt = np.load(occ_gt_file)
-            gt_semantics = occ_gt['semantics'].astype(np.int64)  # 200, 200, 16
-            mask_lidar = occ_gt['mask_lidar'].astype(bool)
-            mask_camera = occ_gt['mask_camera'].astype(bool)
-
-            # 将 ego 坐标系下的标注转换到 lidar 坐标系下
-            # lidar2ego_rotation = bin_info["sensor_info"]["LIDAR_TOP"][0]['sensor2ego_rotation']  # 四元数表示
-            # lidar2ego_rotation = qvec2rotmat(lidar2ego_rotation)  # 3x3 旋转矩阵表示
-            # lidar2ego_translation = bin_info["sensor_info"]["LIDAR_TOP"][0]['sensor2ego_translation']
-            # lidar2ego_transform = np.eye(4)
-            # lidar2ego_transform[:3, :3] = lidar2ego_rotation
-            # lidar2ego_transform[:3, 3] = lidar2ego_translation
-            # ego2lidar_transform = np.linalg.inv(lidar2ego_transform)
-            # aligned_occ_xyz, aligned_occ_range = align_occ_coordinate(xyz, self.occ_range, ego2lidar_transform)
-
-        elif self.occ_dataset_type == "SurroundOcc":  #! SurroundOcc 数据集，使用 lidar 坐标系
-            lidar_filename = self.sample_token_to_lidar_filename[sample_token].split('/')[-1]
-            occ_gt_file = osp.join(self.data_root, "occ_gts", self.occ_dataset_type, "samples", lidar_filename+".npy")
-            if not osp.exists(occ_gt_file):
-                raise FileNotFoundError(f"Occ GT file {occ_gt_file} does not exist !")
-
-            # 读取 occ 标注文件
-            occ_gt = np.load(occ_gt_file)  # N, 4
-            gt_semantics = np.ones((200, 200, 16), dtype=np.int64) * 17
-            gt_semantics[occ_gt[:, 0], occ_gt[:, 1], occ_gt[:, 2]] = occ_gt[:, 3]
-            mask_camera = gt_semantics != 0
-        
-        gt_semantics = torch.as_tensor(gt_semantics, dtype=torch.int64)  # occ label 使用 int64 数据格式
-        occ_xyz = torch.as_tensor(xyz[..., :3], dtype=torch.float32)
-        occ_range = torch.as_tensor(self.occ_range, dtype=torch.float32)
-        mask_camera = torch.as_tensor(mask_camera, dtype=torch.bool)  # mask camera 使用 bool 数据格式
         
 
         # pack data
@@ -407,15 +367,11 @@ class nuScenesDataset(Dataset):
                        "depth_m": output_depths_m, "conf_m": output_confs_m, "mask": output_masks,
                        "c2w": output_c2ws, "fovx": output_fovxs, "fovy": output_fovys,
                        "rays_o": output_rays_o, "rays_d": output_rays_d}
-        
-        output_dict_occ = {"occ_labels": gt_semantics, "occ_xyz": occ_xyz, "occ_range": occ_range, 
-                           "occ_mask_camera": mask_camera, "occ_gt_file": occ_gt_file}
 
         return {
             "bin_token": bin_token,
             "outputs": output_dict,
             "inputs": input_dict,
             "inputs_pix": input_dict_pix,
-            "inputs_vol": input_dict_vol,
-            "outputs_occ": output_dict_occ
+            "inputs_vol": input_dict_vol
         }
