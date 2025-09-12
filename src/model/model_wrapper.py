@@ -64,6 +64,7 @@ class TestCfg:
     compute_scores: bool
     save_image: bool
     save_video: bool
+    save_video_omniscene: bool
     eval_time_skip_steps: int
     save_gt_image: bool
     save_input_images: bool
@@ -546,6 +547,60 @@ class ModelWrapper(LightningModule):
             save_video(
                 [a for a in images_prob],
                 path / "videos" / f"{scene}_frame_{frame_str}.mp4",
+            )
+
+        # 保存 OmniScene 风格的环视浏览视频
+        if self.test_cfg.save_video_omniscene:
+            # forward 3 meters, return, and then rotate. backward 3 meters, return, and then rotate.
+            c2w_cf = batch["target"]["extrinsics"][:, -6]
+            c2w_cf_forward = c2w_cf.clone()
+            c2w_cf_forward[..., 1, 3] = c2w_cf_forward[..., 1, 3] + 3
+            c2w_cfr = batch["target"]["extrinsics"][:, -5]
+            c2w_cfl = batch["target"]["extrinsics"][:, -4]
+            c2w_cb = batch["target"]["extrinsics"][:, -3]
+            c2w_cb[..., 1, 3] = c2w_cb[..., 1, 3] + 1.5
+            c2w_cb_backward = c2w_cb.clone()
+            c2w_cb_backward[..., 1, 3] = c2w_cb_backward[..., 1, 3] - 3
+            c2w_cbl = batch["target"]["extrinsics"][:, -2]
+            c2w_cbr = batch["target"]["extrinsics"][:, -1]
+            # cf -> cfr -> cbr -> cb -> cbl -> cfl -> cf
+            num_frames_short = 60
+            num_frames_long = 120
+            num_frames_all = 60 * 4 + 120 * 6
+            t_short = torch.linspace(0, 1, num_frames_short, dtype=torch.float32, device=self.device)
+            t_long = torch.linspace(0, 1 - 1 / (num_frames_long + 1), num_frames_long, dtype=torch.float32, device=self.device)
+            # obtain camera trajectories for each clip
+            c2w_interp_forward0 = interpolate_extrinsics(c2w_cf, c2w_cf_forward, t_short)
+            c2w_interp_forward1 = interpolate_extrinsics(c2w_cf_forward, c2w_cf, t_short)
+            c2w_interp_0 = interpolate_extrinsics(c2w_cf, c2w_cfr, t_long)
+            c2w_interp_1 = interpolate_extrinsics(c2w_cfr, c2w_cbr, t_long)
+            c2w_interp_2 = interpolate_extrinsics(c2w_cbr, c2w_cb, t_long)
+            c2w_interp_backward0 = interpolate_extrinsics(c2w_cb, c2w_cb_backward, t_short)
+            c2w_interp_backward1 = interpolate_extrinsics(c2w_cb_backward, c2w_cb, t_short)
+            c2w_interp_3 = interpolate_extrinsics(c2w_cb, c2w_cbl, t_long)
+            c2w_interp_4 = interpolate_extrinsics(c2w_cbl, c2w_cfl, t_long)
+            c2w_interp_5 = interpolate_extrinsics(c2w_cfl, c2w_cf, t_long)
+            c2w_interp = torch.cat([c2w_interp_forward0, c2w_interp_forward1,
+                                    c2w_interp_0, c2w_interp_1, c2w_interp_2,
+                                    c2w_interp_backward0, c2w_interp_backward1,
+                                    c2w_interp_3, c2w_interp_4, c2w_interp_5], dim=1)
+            cks_interp = batch["target"]["intrinsics"][:, -6:-5, :, :].repeat(1, num_frames_all, 1, 1)
+            nears_interp = batch["target"]["near"][:, -6:-5].repeat(1, num_frames_all)
+            fars_interp = batch["target"]["far"][:, -6:-5].repeat(1, num_frames_all)
+            # 渲染并保存视频
+            output_omniscene = self.decoder.forward(
+                        gaussians,
+                        c2w_interp,
+                        cks_interp,
+                        nears_interp,
+                        fars_interp,
+                        (h, w),
+                        depth_mode=None,
+                    )
+            images_omniscene = output_omniscene.color[0]
+            save_video(
+                [a for a in images_omniscene],
+                path / "videos_omniscene" / f"{scene}.mp4",
             )
 
         # compute scores

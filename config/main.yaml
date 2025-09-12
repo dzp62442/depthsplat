@@ -73,6 +73,7 @@ test:
   eval_time_skip_steps: 0
   save_image: false
   save_video: false
+  save_video_omniscene: false
   save_gt_image: false
   save_input_images: false
   save_depth: false

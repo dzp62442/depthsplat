@@ -90,6 +90,7 @@ test.save_image=true \
 test.save_gt_image=true \
 test.save_depth=true \
 test.save_gaussian=true \
+test.save_video_omniscene=true \
 test.save_video=true
 ```
 
