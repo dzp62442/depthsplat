@@ -198,7 +198,7 @@ class DatasetOmniScene(Dataset):
         input_c2ws = torch.as_tensor(input_c2ws, dtype=torch.float32)
               
         # load and modify images (cropped or resized if necessary), and modify intrinsics accordingly
-        input_imgs, input_cks = load_conditions(input_img_paths, self.reso, is_input=True, load_rel_depth=self.load_rel_depth)
+        input_imgs, input_masks, input_cks = load_conditions(input_img_paths, self.reso, is_input=True, load_rel_depth=self.load_rel_depth)
         input_cks = torch.as_tensor(input_cks, dtype=torch.float32)
 
         # ======= Render views from non-key frames for rendering losses ====== #
@@ -219,11 +219,12 @@ class DatasetOmniScene(Dataset):
         output_c2ws = torch.as_tensor(output_c2ws, dtype=torch.float32)
         
         # load and modify images (cropped or resized if necessary), and modify intrinsics accordingly
-        output_imgs, output_cks = load_conditions(output_img_paths, self.reso, is_input=False, load_rel_depth=self.load_rel_depth)
+        output_imgs, output_masks, output_cks = load_conditions(output_img_paths, self.reso, is_input=False, load_rel_depth=self.load_rel_depth)
         output_cks = torch.as_tensor(output_cks, dtype=torch.float32)
 
         # add input data to output
         output_imgs = torch.cat([output_imgs, input_imgs], dim=0)
+        output_masks = torch.cat([output_masks, input_masks], dim=0)
         output_c2ws = torch.cat([output_c2ws, input_c2ws], dim=0)
         output_cks = torch.cat([output_cks, input_cks], dim=0)
 
@@ -244,6 +245,7 @@ class DatasetOmniScene(Dataset):
             "near": repeat(torch.tensor(self.near, dtype=torch.float32), "-> v", v=len(output_c2ws)),
             "far": repeat(torch.tensor(self.far, dtype=torch.float32), "-> v", v=len(output_c2ws)),
             "index": torch.arange(len(output_c2ws)),
+            "masks": output_masks,
         }
 
         return {

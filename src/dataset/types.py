@@ -1,6 +1,6 @@
 from typing import Callable, Literal, TypedDict
 
-from jaxtyping import Float, Int64
+from jaxtyping import Float, Int64, Bool
 from torch import Tensor
 
 Stage = Literal["train", "val", "test"]
@@ -20,6 +20,7 @@ class BatchedViews(TypedDict, total=False):
     near: Float[Tensor, "batch _"]  # batch view
     far: Float[Tensor, "batch _"]  # batch view
     index: Int64[Tensor, "batch _"]  # batch view
+    masks: Bool[Tensor, "batch _ _ _"] | None  # batch view height width, optional bool mask
 
 
 class BatchedExample(TypedDict, total=False):
@@ -35,6 +36,7 @@ class UnbatchedViews(TypedDict, total=False):
     near: Float[Tensor, " _"]
     far: Float[Tensor, " _"]
     index: Int64[Tensor, " _"]
+    masks: Bool[Tensor, "_ height width"] | None  # height width, optional bool mask
 
 
 class UnbatchedExample(TypedDict, total=False):

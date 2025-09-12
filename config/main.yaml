@@ -66,6 +66,7 @@ train:
   forward_depth_only: false
   train_ignore_large_loss: 0.
   no_log_projections: false
+  use_dynamic_mask: false
 
 test:
   output_path: outputs/test

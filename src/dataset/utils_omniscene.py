@@ -119,10 +119,25 @@ def load_conditions(img_paths, reso, is_input=False, load_rel_depth=False):
         imgs.append(img)
         cks.append(ck)
 
+        # 动态物体掩码
+        if is_input:  # 输入图像使用全白掩码
+            mask = np.ones(tuple(reso), dtype=np.float32)
+        else:  # 输出图像读取真实掩码
+            mask_path = img_path.replace("sweeps_small", "sweeps_mask_small")
+            mask_path = mask_path.replace("samples_small", "samples_mask_small")
+            mask_path = mask_path.replace(".jpg", ".png")
+            mask = Image.open(mask_path).convert('L')  # convert to grayscale
+            if resize_flag:
+                mask = mask.resize((reso[1], reso[0]), Image.BILINEAR)
+            mask = np.array(mask).astype(np.float32)
+            mask = mask / 255.0
+        masks.append(mask)
+
     imgs = torch.from_numpy(np.stack(imgs, axis=0)).permute(0, 3, 1, 2).float() / 255.0  # [v c h w]
+    masks = torch.from_numpy(np.stack(masks, axis=0)).bool()  # [v h w]
     cks = torch.as_tensor(cks, dtype=torch.float32)
 
-    return imgs, cks
+    return imgs, masks, cks
 
 def get_ray_directions(
     H: int,

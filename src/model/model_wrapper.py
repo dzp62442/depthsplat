@@ -94,6 +94,7 @@ class TrainCfg:
     forward_depth_only: bool
     train_ignore_large_loss: float
     no_log_projections: bool
+    use_dynamic_mask: bool
 
 
 @runtime_checkable
@@ -237,7 +238,11 @@ class ModelWrapper(LightningModule):
         # Compute and log loss.
         total_loss = 0
 
-        valid_depth_mask = None
+        if self.train_cfg.use_dynamic_mask:  # 对输出图像使用动态物体掩码，仅在训练计算损失时有效
+            valid_depth_mask = batch["target"]["masks"].unsqueeze(2).expand(-1, -1, 3, -1, -1)
+            valid_depth_mask = ~valid_depth_mask  # 原始掩码：白色有效，计算损失；新掩码：黑色有效，计算损失
+        else:
+            valid_depth_mask = None   
 
         for loss_fn in self.losses:
             if loss_fn.name == "mse":

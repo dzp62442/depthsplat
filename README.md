@@ -10,6 +10,7 @@ model.encoder.upsample_factor=4 \
 model.encoder.lowest_feature_resolution=4 \
 checkpointing.pretrained_monodepth=pretrained/depth_anything_v2_vits.pth \
 checkpointing.pretrained_mvdepth=pretrained/gmflow-scale1-things-e9887eda.pth \
+train.use_dynamic_mask=true \
 output_dir=checkpoints/omniscene-112x200-depthsplat-small \
 checkpointing.resume=true wandb.id=WANDB_ID  # 仅在恢复训练时使用
 ```
@@ -25,6 +26,7 @@ model.encoder.lowest_feature_resolution=4 \
 model.encoder.monodepth_vit_type=vitb \
 checkpointing.pretrained_monodepth=pretrained/depth_anything_v2_vitb.pth \
 checkpointing.pretrained_mvdepth=pretrained/gmflow-scale1-things-e9887eda.pth \
+train.use_dynamic_mask=true \
 output_dir=checkpoints/omniscene-112x200-depthsplat-base \
 checkpointing.resume=true wandb.id=WANDB_ID  # 仅在恢复训练时使用
 ```
@@ -40,6 +42,7 @@ model.encoder.lowest_feature_resolution=4 \
 model.encoder.monodepth_vit_type=vitl \
 checkpointing.pretrained_monodepth=pretrained/depth_anything_v2_vitl.pth \
 checkpointing.pretrained_mvdepth=pretrained/gmflow-scale1-things-e9887eda.pth \
+train.use_dynamic_mask=true \
 output_dir=checkpoints/omniscene-112x200-depthsplat-large \
 checkpointing.resume=true wandb.id=WANDB_ID  # 仅在恢复训练时使用
 ```
