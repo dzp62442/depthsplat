@@ -21,11 +21,13 @@
    - `extrinsics`（`c2w`）、`intrinsics`、`image`、`near`、`far`、`index`。
    - `target` 额外带 `masks`，供动静态区域过滤使用。
    这些字段与其它数据集完全一致，可直接被 `DataModule`/`ModelWrapper` 处理。
+   - `context` 包含 6 个输入视图，`target` 包含 18 个输出视图（含输入帧）。
 
 ## 主程序调用方式
 - 主入口 `src/main.py` 通过 Hydra 解析配置后实例化 `DataModule`，从而自动创建 `DatasetOmniScene`。训练或测试命令只需传入 `+experiment=omniscene_*`（或在配置中覆盖 `dataset=omniscene`）即可加载该数据集。
 - 在 `src/model/model_wrapper.py` 的 `training_step` 中，当 `train.use_dynamic_mask=true` 时会读取 `batch["target"]["masks"]` 构造掩码，把动态区域从损失中剔除；OmniScene loader 已提供有效掩码，因此无需额外修改模型代码。
 - 模型内部（EncoderDepthSplat + DecoderSplattingCUDA）会自行预测深度、计算射线并渲染图像，数据集中只需提供 RGB 和相机参数。
+- 由于注意力模块要求输入尺寸是 8 的倍数，`EncoderDepthSplat` 在其 `get_data_shim` 中调用 `src/dataset/shims/patch_shim.py` 的 `apply_patch_shim_to_views` 对 `context/target` 做中心裁剪（独立于 `load_conditions` 的 resize）。原实现只处理图像和内参；针对 OmniScene 的动态掩码，我们补充了 mask 支持——若视图包含 `masks` 字段，裁剪同时更新掩码，从而在 `train.use_dynamic_mask` 下保持像素对齐。
 - 测试阶段新增了 `test.save_video_omniscene` 开关（与 `save_video` 并列）。开启后，`ModelWrapper.test_step` 会基于输出序列最后 6 个环视姿态生成自定义轨迹：向前/向后平移并串联 360° 环视路径，通过 `interpolate_extrinsics` 与固定内参、near/far 组合成连续相机序列，再调用解码器渲染 OmniScene 风格的环视视频并保存至 `videos_omniscene/<scene>.mp4`。
 
 ## 与 SVF-GS 的差异与注意事项
