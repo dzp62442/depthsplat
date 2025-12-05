@@ -59,6 +59,9 @@ ps aux|grep wandb|grep -v grep | awk '{print $2}'|xargs kill -9
 ```
 
 ### 测试
+
+> 默认使用 mini-test 模式，如需完整测试，请手动注释 `dataset_omniscene.py` 中的抽样语句。
+
 - small model
 ```bash
 python -m src.main +experiment=omniscene_112x200 \
