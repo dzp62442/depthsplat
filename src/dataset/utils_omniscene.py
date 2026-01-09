@@ -95,9 +95,7 @@ def load_conditions(img_paths, reso, is_input=False, load_rel_depth=False):
         return np.array(img), ck, resize_flag
     
     imgs, cks = [], []
-    depths = []
-    depths_m = []
-    confs_m = []
+    rel_depths = [] if load_rel_depth else None
     masks = []
     for img_path in img_paths:      
         # param
@@ -119,6 +117,24 @@ def load_conditions(img_paths, reso, is_input=False, load_rel_depth=False):
         imgs.append(img)
         cks.append(ck)
 
+        # DepthAnything-v2 预测的相对深度
+        if load_rel_depth:
+            depth_path = img_path.replace("sweeps_small", "sweeps_dpt_small")
+            depth_path = depth_path.replace("samples_small", "samples_dpt_small")
+            depth_path = depth_path.replace(".jpg", ".npy")
+            disp = np.load(depth_path).astype(np.float32)
+            if resize_flag:
+                disp = Image.fromarray(disp)
+                disp = disp.resize((reso[1], reso[0]), Image.BILINEAR)
+                disp = np.array(disp)
+            # disparity 转相对深度（限制最远/最近比例为 50）
+            ratio = min(disp.max() / (disp.min() + 0.001), 50.0)
+            max_val = disp.max()
+            min_val = max_val / ratio
+            depth = 1 / np.maximum(disp, min_val)
+            depth = (depth - depth.min()) / (depth.max() - depth.min())
+            rel_depths.append(depth)
+
         # 动态物体掩码
         if is_input:  # 输入图像使用全白掩码
             mask = np.ones(tuple(reso), dtype=np.float32)
@@ -136,8 +152,13 @@ def load_conditions(img_paths, reso, is_input=False, load_rel_depth=False):
     imgs = torch.from_numpy(np.stack(imgs, axis=0)).permute(0, 3, 1, 2).float() / 255.0  # [v c h w]
     masks = torch.from_numpy(np.stack(masks, axis=0)).bool()  # [v h w]
     cks = torch.as_tensor(cks, dtype=torch.float32)
+    rel_depths_tensor = (
+        None
+        if rel_depths is None
+        else torch.from_numpy(np.stack(rel_depths, axis=0)).float()
+    )
 
-    return imgs, masks, cks
+    return imgs, masks, cks, rel_depths_tensor
 
 def get_ray_directions(
     H: int,

@@ -21,6 +21,7 @@ class BatchedViews(TypedDict, total=False):
     far: Float[Tensor, "batch _"]  # batch view
     index: Int64[Tensor, "batch _"]  # batch view
     masks: Bool[Tensor, "batch _ _ _"] | None  # batch view height width, optional bool mask
+    rel_depth: Float[Tensor, "batch _ _ _"] | None  # batch view height width, optional relative depth
 
 
 class BatchedExample(TypedDict, total=False):
@@ -37,6 +38,7 @@ class UnbatchedViews(TypedDict, total=False):
     far: Float[Tensor, " _"]
     index: Int64[Tensor, " _"]
     masks: Bool[Tensor, "_ height width"] | None  # height width, optional bool mask
+    rel_depth: Float[Tensor, "_ height width"] | None  # height width, optional relative depth
 
 
 class UnbatchedExample(TypedDict, total=False):

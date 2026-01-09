@@ -145,7 +145,7 @@ class DatasetOmniScene(Dataset):
         cfg: DatasetOmniSceneCfg,
         stage: Stage,
         view_sampler: ViewSampler,
-        load_rel_depth: bool = False  # 仅在 evaluate.py 中加载相对深度，用于计算 PCC 指标
+        load_rel_depth: bool | None = None  # 仅在 test 阶段加载相对深度，用于计算 PCC 指标
     ):
         super().__init__()
         self.cfg = cfg
@@ -158,7 +158,11 @@ class DatasetOmniScene(Dataset):
 
         self.reso = cfg.image_shape
         self.data_root = str(cfg.roots[0])
-        self.load_rel_depth = load_rel_depth        
+        self.load_rel_depth = (
+            stage == "test" if load_rel_depth is None else load_rel_depth
+        )
+        if stage != "test":
+            self.load_rel_depth = False
         
         # load bin tokens
         if stage == "train":
@@ -198,7 +202,12 @@ class DatasetOmniScene(Dataset):
         input_c2ws = torch.as_tensor(input_c2ws, dtype=torch.float32)
               
         # load and modify images (cropped or resized if necessary), and modify intrinsics accordingly
-        input_imgs, input_masks, input_cks = load_conditions(input_img_paths, self.reso, is_input=True, load_rel_depth=self.load_rel_depth)
+        input_imgs, input_masks, input_cks, input_rel_depths = load_conditions(
+            input_img_paths,
+            self.reso,
+            is_input=True,
+            load_rel_depth=self.load_rel_depth,
+        )
         input_cks = torch.as_tensor(input_cks, dtype=torch.float32)
 
         # ======= Render views from non-key frames for rendering losses ====== #
@@ -219,7 +228,12 @@ class DatasetOmniScene(Dataset):
         output_c2ws = torch.as_tensor(output_c2ws, dtype=torch.float32)
         
         # load and modify images (cropped or resized if necessary), and modify intrinsics accordingly
-        output_imgs, output_masks, output_cks = load_conditions(output_img_paths, self.reso, is_input=False, load_rel_depth=self.load_rel_depth)
+        output_imgs, output_masks, output_cks, output_rel_depths = load_conditions(
+            output_img_paths,
+            self.reso,
+            is_input=False,
+            load_rel_depth=self.load_rel_depth,
+        )
         output_cks = torch.as_tensor(output_cks, dtype=torch.float32)
 
         # add input data to output
@@ -227,6 +241,10 @@ class DatasetOmniScene(Dataset):
         output_masks = torch.cat([output_masks, input_masks], dim=0)
         output_c2ws = torch.cat([output_c2ws, input_c2ws], dim=0)
         output_cks = torch.cat([output_cks, input_cks], dim=0)
+        if output_rel_depths is not None and input_rel_depths is not None:
+            output_rel_depths = torch.cat(
+                [output_rel_depths, input_rel_depths], dim=0
+            )
 
         # pack data
         context = {
@@ -247,6 +265,8 @@ class DatasetOmniScene(Dataset):
             "index": torch.arange(len(output_c2ws)),
             "masks": output_masks,
         }
+        if output_rel_depths is not None:
+            target["rel_depth"] = output_rel_depths
 
         return {
             "context": context,
