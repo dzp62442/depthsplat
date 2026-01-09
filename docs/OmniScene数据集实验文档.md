@@ -30,6 +30,22 @@
 - 由于注意力模块要求输入尺寸是 8 的倍数，`EncoderDepthSplat` 在其 `get_data_shim` 中调用 `src/dataset/shims/patch_shim.py` 的 `apply_patch_shim_to_views` 对 `context/target` 做中心裁剪（独立于 `load_conditions` 的 resize）。原实现只处理图像和内参；针对 OmniScene 的动态掩码，我们补充了 mask 支持——若视图包含 `masks` 字段，裁剪同时更新掩码，从而在 `train.use_dynamic_mask` 下保持像素对齐。
 - 测试阶段新增了 `test.save_video_omniscene` 开关（与 `save_video` 并列）。开启后，`ModelWrapper.test_step` 会基于输出序列最后 6 个环视姿态生成自定义轨迹：向前/向后平移并串联 360° 环视路径，通过 `interpolate_extrinsics` 与固定内参、near/far 组合成连续相机序列，再调用解码器渲染 OmniScene 风格的环视视频并保存至 `videos_omniscene/<scene>.mp4`。
 
+## PCC 指标补充方案
+1. **相对深度加载（仅 test）**：
+   - 参考 SVF-GS 的 `data/transforms/loading.py`：读取 DepthAnything-v2 预测的 disparity（`samples_dpt_small`/`sweeps_dpt_small` 下 `.npy`），若发生 resize 需同步缩放；再用 inverse disparity 转为相对深度，并限制最大/最小比值为 50（与原实现一致），最终做 min-max 归一化到 `[0, 1]`。
+   - DepthSplat 侧建议在 `src/dataset/utils_omniscene.py::load_conditions` 中受 `load_rel_depth` 控制返回 `rel_depth`（`[v, h, w]`），`DatasetOmniScene` 仅在 `stage="test"` 时传入 `load_rel_depth=True` 并在 `target` 中加入 `rel_depth`；其它阶段保持 `rel_depth=None`。
+   - 若需要 patch shim（`apply_patch_shim_to_views`）保证分辨率可整除，新增对 `rel_depth` 的中心裁剪逻辑，保持与 `image/masks/intrinsics` 对齐。
+2. **测试时渲染深度**：
+   - 渲染端已支持深度输出：`DecoderSplattingCUDA.forward` 在 `depth_mode` 非空时会走 `render_depth_cuda` 并返回 `DecoderOutput.depth`（`[b, v, h, w]`）。
+   - 当前 `ModelWrapper.test_step` 与 `run_full_test_sets_eval` 均传入 `depth_mode=None`，因此测试阶段不会产出深度。方案是：当 `target["rel_depth"]` 存在且需要 PCC 时，将 `decoder.forward(..., depth_mode="depth")`（或根据需求选 `"disparity"/"relative_disparity"`）并保留 `output.depth`，注意 chunk 渲染分支也要同步开启。
+   - 为避免额外开销，可新增测试配置开关（例如 `test.render_depth_for_metrics`）或复用 `compute_scores` 条件，仅在计算 PCC 时开启深度渲染。
+3. **PCC 计算位置**：
+   - 参考 SVF-GS 的 `tools/metrics.py`，使用 `torchmetrics.PearsonCorrCoef` 实现 `get_pcc/compute_pcc`，放在 `src/evaluation/metrics.py` 与 PSNR/SSIM/LPIPS 同文件。
+   - 在 `ModelWrapper.test_step` 与 `run_full_test_sets_eval` 中，与 PSNR/SSIM/LPIPS 同步计算 `compute_pcc(target_rel_depth, pred_depth)`；仅当 `target["rel_depth"]` 与 `output.depth` 同时存在时启用。
+4. **PCC 统计与汇总**：
+   - 复用 `test_step_outputs` 与 `on_test_end` 的汇总逻辑，新增 `pcc` key，输出 `scores_pcc_all.json` 并写入 `scores_all_avg.json`。
+   - 在 `run_full_test_sets_eval` 的 `scores_dict` 中加入 `pcc` 字段，确保与 `psnr/ssim/lpips` 同层级记录与打印。
+
 ## 与 SVF-GS 的差异与注意事项
 1. **返回字段**：SVF-GS 的 `data/dataloader.py` 还会返回 DepthAnything/Metric3D 的深度、置信度、射线、`w2i` 等信息；DepthSplat 作为通用前馈高斯重建框架，只需要输入/输出图像、相机内外参、near/far、索引及动态掩码。深度与射线由模型在运行时计算，动态掩码则借助已有 mask 接口融入损失。
 2. **掩码接入**：原 RE10k/DL3DV 数据集没有动态掩码；OmniScene loader 在 `load_conditions` 中加载 `*_mask_small` 掩码并通过 `train.use_dynamic_mask` 接入训练流程。这是新引入但与项目现有 mask 逻辑兼容的扩展。
