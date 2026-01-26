@@ -614,10 +614,13 @@ class ModelWrapper(LightningModule):
                         depth_mode=None,
                     )
             images_omniscene = output_omniscene.color[0]
-            save_video(
-                [a for a in images_omniscene],
-                path / "videos_omniscene" / f"{scene}.mp4",
-            )
+            dump_path = path / "videos_omniscene" / f"{scene}.mp4"
+            dump_path.parent.mkdir(exist_ok=True, parents=True)
+            video = (images_omniscene.clip(min=0, max=1) * 255).type(torch.uint8).cpu().numpy()
+            video_rec = wandb.Video(video[None], fps=30, format="mp4")
+            video_tensor = video_rec._prepare_video(video_rec.data)
+            clip = mpy.ImageSequenceClip(list(video_tensor), fps=30)
+            clip.write_videofile(str(dump_path), codec='libx264', preset='medium', logger=None)
 
         # compute scores
         if self.test_cfg.compute_scores:
