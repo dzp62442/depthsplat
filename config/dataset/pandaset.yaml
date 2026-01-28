@@ -1,0 +1,21 @@
+defaults:
+  - view_sampler: all
+
+name: pandaset
+roots: [datasets/PandaSet]
+make_baseline_1: false
+augment: true
+
+image_shape: [224, 400]
+background_color: [0.0, 0.0, 0.0]
+cameras_are_circular: false
+
+baseline_epsilon: 1e-3
+max_fov: 100.0
+
+skip_bad_shape: true
+near: -1.
+far: -1.
+baseline_scale_bounds: true
+shuffle_val: true
+test_len: -1

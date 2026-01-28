@@ -4,6 +4,7 @@ from ..misc.step_tracker import StepTracker
 from .dataset_re10k import DatasetRE10k, DatasetRE10kCfg
 from .dataset_dl3dv import DatasetDL3DV, DatasetDL3DVCfg
 from .dataset_omniscene import DatasetOmniScene, DatasetOmniSceneCfg
+from .dataset_pandaset import DatasetPandaSet, DatasetPandaSetCfg
 from .types import Stage
 from .view_sampler import get_view_sampler
 
@@ -11,10 +12,10 @@ DATASETS: dict[str, Dataset] = {
     "re10k": DatasetRE10k,
     "dl3dv": DatasetDL3DV,
     "omniscene": DatasetOmniScene,
+    "pandaset": DatasetPandaSet,
 }
 
-
-DatasetCfg = DatasetRE10kCfg | DatasetDL3DVCfg | DatasetOmniSceneCfg
+DatasetCfg = DatasetRE10kCfg | DatasetDL3DVCfg | DatasetOmniSceneCfg | DatasetPandaSetCfg
 
 
 def get_dataset(

@@ -106,6 +106,30 @@ test.save_video_omniscene=true \
 test.save_video=true
 ```
 
+### 零样本泛化实验
+
+- small model
+```bash
+python -m src.main +experiment=pandaset_112x200 \
+mode=test \
+model.encoder.upsample_factor=4 \
+model.encoder.lowest_feature_resolution=4 \
+checkpointing.pretrained_model=checkpoints/omniscene-112x200-depthsplat-small/checkpoints/epoch_0-step_100000.ckpt \
+output_dir=outputs/depthsplat-pandaset-112x200-small \
+```
+
+- base model
+```bash
+python -m src.main +experiment=pandaset_112x200 \
+mode=test \
+model.encoder.num_scales=2 \
+model.encoder.upsample_factor=2 \
+model.encoder.lowest_feature_resolution=4 \
+model.encoder.monodepth_vit_type=vitb \
+checkpointing.pretrained_model=checkpoints/omniscene-112x200-depthsplat-base/checkpoints/epoch_0-step_100000.ckpt \
+output_dir=outputs/depthsplat-pandaset-112x200-base \
+```
+
 ---
 
 <p align="center">
