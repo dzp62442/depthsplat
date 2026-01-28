@@ -96,6 +96,8 @@ class DatasetPandaSet(Dataset):
             self.bin_tokens = json.load(open(bins_path))[
                 "bins"
             ]
+            indices = np.linspace(0, len(self.bin_tokens) - 1, 100, dtype=int)  # mini-test
+            self.bin_tokens = [self.bin_tokens[i] for i in indices]
         else:
             raise ValueError(f"不支持的阶段: {stage}")
 
