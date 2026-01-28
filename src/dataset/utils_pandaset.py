@@ -26,12 +26,19 @@ def HWC3(x):
 
 
 def resolve_image_path(img_path: str | Path, data_root: Path) -> Path:
-    """解析图像路径，兼容 SVF-GS 预处理生成的相对/绝对路径。"""
+    """解析图像路径，兼容 raw/images_small 的相对/绝对路径。"""
     path = Path(img_path)
     if path.exists():
         return path
 
     parts = path.parts
+    if "images_small" in parts:
+        images_idx = parts.index("images_small")
+        suffix = Path(*parts[images_idx + 1 :])
+        candidate = Path(data_root) / "processed" / "images_small" / suffix
+        if candidate.exists():
+            return candidate
+
     if "raw" in parts:
         raw_idx = parts.index("raw")
         suffix = Path(*parts[raw_idx + 1 :])
@@ -47,6 +54,19 @@ def resolve_image_path(img_path: str | Path, data_root: Path) -> Path:
             return candidate
 
     return Path(data_root) / path
+
+
+def parse_seq_cam_frame(img_path: Path) -> tuple[str, str, str]:
+    parts = img_path.parts
+    if "images_small" in parts:
+        idx = parts.index("images_small")
+        return parts[idx + 1], parts[idx + 2], img_path.stem
+    if "raw" in parts:
+        idx = parts.index("raw")
+        seq_id = parts[idx + 1]
+        cam_name = parts[idx + 3] if parts[idx + 2] == "camera" else parts[idx + 2]
+        return seq_id, cam_name, img_path.stem
+    return img_path.parents[1].name, img_path.parent.name, img_path.stem
 
 
 def load_info(info: dict, data_root: Path):
@@ -96,13 +116,11 @@ def load_conditions(
 
     for img_path in img_paths:
         img_path = Path(img_path)
-        # PandaSet 原始路径结构：.../raw/<seq>/camera/<cam>/<frame>.jpg
-        seq_id = img_path.parents[2].name
-        cam_name = img_path.parents[0].name
-        frame_id = img_path.stem
+        # 支持 processed/images_small 与 raw 路径
+        seq_id, cam_name, frame_id = parse_seq_cam_frame(img_path)
 
         # 读取内参
-        param_path = processed_root / "params" / seq_id / cam_name / f"{frame_id}.json"
+        param_path = processed_root / "params_small" / seq_id / cam_name / f"{frame_id}.json"
         with open(param_path, "r", encoding="utf-8") as f:
             param = json.load(f)
         ck = np.array(param["camera_intrinsic"], dtype=np.float32)

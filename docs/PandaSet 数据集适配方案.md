@@ -1,6 +1,6 @@
 # PandaSet 数据集适配方案（DepthSplat / comp_svfgs）
 
-> 本文档仅描述**计划实施方案**与对照依据，不进行代码修改。后续实现将严格遵循本文方案。
+> 本文档描述当前实现与对照依据，后续变更将以此为准。
 
 ## 1. 目标与约束
 - **目标**：在 DepthSplat（comp_svfgs 分支）中接入 PandaSet 数据集，进行**零样本泛化**实验；训练/验证/测试配置与 Omni-Scene 保持一致。
@@ -8,6 +8,7 @@
 - **动态物体掩码**：不需要生成/加载动态掩码，全部视为静态；如需字段占位，统一使用全 1 mask。
 - **PCC 指标**：如果需要计算，直接使用 **Metric3D-v2 的尺度深度**（无需 DepthAnything 相对深度）。
 - **坐标系**：本项目**不做** `flip_yz`；仅 SVF-GS 需要。
+- **光心对齐**：预处理阶段已完成主点居中与裁切/缩放，输出统一为 224×400。
 
 ## 2. 现有 Omni-Scene（nuScenes 风格）实现回顾（对照基准）
 参考 `docs/OmniScene数据集实验文档.md` 与代码实现：
@@ -34,19 +35,22 @@ SVF-GS 文档与脚本：
 datasets/PandaSet/
   raw/                       # 原始 PandaSet（不改动）
   processed/
+    images_small/            # 光心修正 + 裁切/缩放后的 224x400 图像
+      <seq>/<camera>/<frame>.jpg
+    params_small/            # 对应 images_small 的内参（主点居中）
+      <seq>/<camera>/<frame>.json     # camera_intrinsic
     bins_train.json
     bins_test.json
     bin_infos/
       pandaset_<seq>_<frame>.pkl
-    params/
-      <seq>/<camera>/<frame>.json     # camera_intrinsic
     dptm/
       <seq>/<camera>/<frame>_dpt.npy  # Metric3D-v2 深度
       <seq>/<camera>/<frame>_conf.npy
 ```
 说明：
 - `bin_infos/*.pkl` 内含每个 bin 的 6 路相机数据与 `sensor2lidar_*` 信息（与 Omni-Scene 风格一致）。
-- `params/` 与 `dptm/` 的组织方式与 SVF-GS 保持一致，便于复用数据。
+- `images_small/` 与 `params_small/` 已完成光心对齐与 224×400 统一分辨率。
+- `dptm/` 基于 `images_small` 生成，与其尺寸对齐。
 
 ## 4. 计划实现方案（不改代码，先定方案）
 
@@ -92,8 +96,9 @@ datasets/PandaSet/
     - `c2w = sensor2lidar_transform` **直接使用，不做 flip_yz**。
     - `w2c` 计算与 `utils_omniscene.py` 保持一致。
   - `load_conditions(img_paths, reso, processed_root, load_rel_depth)`：
-    - 从 `processed/params/<seq>/<cam>/<frame>.json` 读取内参。
-    - resize 时同步缩放内参；并按 DepthSplat 约定进行**归一化**：
+    - 图像路径指向 `processed/images_small`；不再读取 raw 图像。
+    - 从 `processed/params_small/<seq>/<cam>/<frame>.json` 读取内参。
+    - 若 `reso != [224, 400]`，则二次 resize 并同步缩放内参；随后按 DepthSplat 约定进行**归一化**：
       - `ck[0, :] /= W`, `ck[1, :] /= H`。
     - 加载 Metric3D 深度 `*_dpt.npy`（可忽略 `_conf.npy`）。
     - mask 统一为全 1（静态场景）。
@@ -135,8 +140,6 @@ datasets/PandaSet/
 
 ---
 
-## 7. 待你审阅的关键点
-- PandaSet 数据组织（`datasets/PandaSet` 结构）是否与当前软链接一致？
-- PCC 是否完全不需要（若完全不需要，可默认不加载 `rel_depth`）？
-
-审阅通过后，我将按以上方案实现代码接入。
+## 7. 已确认事项
+- PandaSet 数据组织与 `datasets/PandaSet` 软链接一致。
+- PCC 使用 Metric3D-v2 尺度深度参与计算。
