@@ -28,6 +28,8 @@ class BatchedExample(TypedDict, total=False):
     target: BatchedViews
     context: BatchedViews
     scene: list[str]
+    scene_id: list[str]
+    evaluation_protocol: list[str]
 
 
 class UnbatchedViews(TypedDict, total=False):
@@ -45,6 +47,8 @@ class UnbatchedExample(TypedDict, total=False):
     target: UnbatchedViews
     context: UnbatchedViews
     scene: str
+    scene_id: str
+    evaluation_protocol: str
 
 
 # A data shim modifies the example after it's been returned from the data loader.

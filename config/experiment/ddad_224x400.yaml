@@ -1,7 +1,7 @@
 # @package _global_
 
 defaults:
-  - override /dataset: pandaset
+  - override /dataset: ddad
   - override /model/encoder: depthsplat
   - override /loss: [mse, lpips]
 
@@ -10,8 +10,8 @@ hydra:
     dir: ${output_dir}/logs/hydra
 
 wandb:
-  name: pandaset_224x400
-  tags: [pandaset, 224x400]
+  name: ddad_224x400
+  tags: [ddad, 224x400]
 
 data_loader:
   train:
@@ -38,9 +38,9 @@ loss:
     apply_after_step: 0
     weight: 0.05
 
-dataset: 
+dataset:
   image_shape: [224, 400]
-  roots: [datasets/PandaSet]
+  roots: [datasets/DDAD]
   near: 0.5
   far: 100.
   baseline_scale_bounds: false

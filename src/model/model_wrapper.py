@@ -23,6 +23,7 @@ from ..dataset.data_module import get_data_shim
 from ..dataset.types import BatchedExample
 from ..dataset import DatasetCfg
 from ..evaluation.metrics import compute_lpips, compute_pcc, compute_psnr, compute_ssim
+from ..evaluation.zero_shot import view_group_records, write_zero_shot_results
 from ..global_cfg import get_cfg
 from ..loss import Loss
 from ..misc.benchmarker import Benchmarker
@@ -150,6 +151,8 @@ class ModelWrapper(LightningModule):
         # This is used for testing.
         self.benchmarker = Benchmarker()
         self.eval_cnt = 0
+        self.zero_shot_metadata = None
+        self.zero_shot_records = []
 
         if self.test_cfg.compute_scores:
             self.test_step_outputs = {}
@@ -364,10 +367,36 @@ class ModelWrapper(LightningModule):
 
         return total_loss
 
+    def on_test_start(self):
+        self.zero_shot_metadata = None
+        self.zero_shot_records = []
+        dataset = self.trainer.test_dataloaders.dataset
+        if hasattr(dataset, "evaluation_metadata"):
+            if self.trainer.world_size != 1:
+                raise ValueError("Temporal18 evaluation requires one GPU; set CUDA_VISIBLE_DEVICES")
+            if self.train_cfg.forward_depth_only or self.test_cfg.stablize_camera:
+                raise ValueError("Temporal18 evaluation requires GS rendering at the indexed target cameras")
+            self.zero_shot_metadata = dataset.evaluation_metadata()
+            self.zero_shot_metadata["checkpoint"] = self.checkpoint_provenance
+            if self.test_cfg.compute_scores:
+                out_dir = Path(get_cfg()["output_dir"]) / "metrics"
+                out_dir.mkdir(parents=True, exist_ok=True)
+                # A failed rerun must not leave an old "complete" summary in place.
+                with (out_dir / "evaluation_summary.json").open("w") as handle:
+                    json.dump({"complete": False, "status": "running",
+                               "expected_bins": len(dataset)}, handle)
+
     def test_step(self, batch, batch_idx):
         batch: BatchedExample = self.data_shim(batch)
         b, v, _, h, w = batch["target"]["image"].shape
         assert b == 1
+        if self.zero_shot_metadata is not None:
+            if v != 18 or batch.get("evaluation_protocol") != ["svfgs_temporal18_v1"]:
+                raise ValueError("Expected temporal18 batch")
+            actual_shape = [h, w]
+            previous = self.zero_shot_metadata.setdefault("actual_image_shape", actual_shape)
+            if previous != actual_shape:
+                raise ValueError("Image shape changed during evaluation")
 
         pred_depths = None
 
@@ -638,16 +667,23 @@ class ModelWrapper(LightningModule):
                 if f"lpips" not in self.test_step_outputs:
                     self.test_step_outputs[f"lpips"] = []
 
-                self.test_step_outputs[f"psnr"].append(
-                    compute_psnr(rgb_gt, rgb).mean().item()
-                )
-                self.test_step_outputs[f"ssim"].append(
-                    compute_ssim(rgb_gt, rgb).mean().item()
-                )
-                self.test_step_outputs[f"lpips"].append(
-                    compute_lpips(rgb_gt, rgb).mean().item()
-                )
-                if output.depth is not None and "rel_depth" in batch["target"]:
+                image_metrics = {
+                    "psnr": compute_psnr(rgb_gt, rgb),
+                    "ssim": compute_ssim(rgb_gt, rgb),
+                    "lpips": compute_lpips(rgb_gt, rgb),
+                }
+                if self.zero_shot_metadata is not None:
+                    records = view_group_records(
+                        scene, batch["scene_id"][0], image_metrics,
+                        batch["target"]["rel_depth"][0],
+                        None if output.depth is None else output.depth[0])
+                    self.zero_shot_records.extend(records)
+                    for name in ("psnr", "ssim", "lpips", "pcc"):
+                        self.test_step_outputs.setdefault(name, []).append(records[0][name])
+                else:
+                    for name, values in image_metrics.items():
+                        self.test_step_outputs[name].append(values.mean().item())
+                if self.zero_shot_metadata is None and output.depth is not None and "rel_depth" in batch["target"]:
                     if f"pcc" not in self.test_step_outputs:
                         self.test_step_outputs[f"pcc"] = []
                     rel_depth = batch["target"]["rel_depth"]
@@ -661,6 +697,9 @@ class ModelWrapper(LightningModule):
         out_dir = Path(self.test_cfg.output_path)
         saved_scores = {}
         if self.test_cfg.compute_scores:
+            if self.zero_shot_metadata is not None:
+                summary = write_zero_shot_results(out_dir, self.zero_shot_records, self.zero_shot_metadata)
+                print("Primary result: final/all_18", summary["final/all_18"])
             self.benchmarker.dump_memory(out_dir / "peak_memory.json")
             self.benchmarker.dump(out_dir / "benchmark.json")
 
@@ -674,9 +713,9 @@ class ModelWrapper(LightningModule):
 
             for tag, times in self.benchmarker.execution_times.items():
                 times = times[int(self.time_skip_steps_dict[tag]) :]
-                saved_scores[tag] = [len(times), np.mean(times)]
+                saved_scores[tag] = [len(times), float(np.mean(times)) if len(times) else None]
                 print(
-                    f"{tag}: {len(times)} calls, avg. {np.mean(times)} seconds per call"
+                    f"{tag}: {len(times)} calls, avg. {saved_scores[tag][1]} seconds per call"
                 )
                 self.time_skip_steps_dict[tag] = 0
 

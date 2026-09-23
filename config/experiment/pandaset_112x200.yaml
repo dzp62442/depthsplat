@@ -5,6 +5,10 @@ defaults:
   - override /model/encoder: depthsplat
   - override /loss: [mse, lpips]
 
+hydra:
+  run:
+    dir: ${output_dir}/logs/hydra
+
 wandb:
   name: pandaset_112x200
   tags: [pandaset, 112x200]

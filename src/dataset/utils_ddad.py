@@ -1,4 +1,4 @@
-"""PandaSet processed assets. Poses remain OpenCV c2w for DepthSplat."""
+"""DDAD processed assets. Poses remain OpenCV c2w for DepthSplat."""
 
 import hashlib
 import json
@@ -130,7 +130,7 @@ def load_conditions(img_paths: list[str], reso: list[int], processed_root: Path,
                 raise ValueError(f"Invalid source image shape: {path}")
             image = source.convert("RGB")
             if (height, width) != (source_h, source_w):
-                # Preserve PandaSet's original PIL RGB resize (default: bicubic).
+                # Match the existing PandaSet loader's PIL RGB resize.
                 image = image.resize((width, height), Image.Resampling.BICUBIC)
             images.append(np.asarray(image, dtype=np.float32) / 255.0)
         k = k.copy()

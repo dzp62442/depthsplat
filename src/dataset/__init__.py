@@ -5,6 +5,7 @@ from .dataset_re10k import DatasetRE10k, DatasetRE10kCfg
 from .dataset_dl3dv import DatasetDL3DV, DatasetDL3DVCfg
 from .dataset_omniscene import DatasetOmniScene, DatasetOmniSceneCfg
 from .dataset_pandaset import DatasetPandaSet, DatasetPandaSetCfg
+from .dataset_ddad import DatasetDDAD, DatasetDDADCfg
 from .types import Stage
 from .view_sampler import get_view_sampler
 
@@ -13,9 +14,10 @@ DATASETS: dict[str, Dataset] = {
     "dl3dv": DatasetDL3DV,
     "omniscene": DatasetOmniScene,
     "pandaset": DatasetPandaSet,
+    "ddad": DatasetDDAD,
 }
 
-DatasetCfg = DatasetRE10kCfg | DatasetDL3DVCfg | DatasetOmniSceneCfg | DatasetPandaSetCfg
+DatasetCfg = DatasetRE10kCfg | DatasetDL3DVCfg | DatasetOmniSceneCfg | DatasetPandaSetCfg | DatasetDDADCfg
 
 
 def get_dataset(

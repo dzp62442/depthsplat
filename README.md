@@ -108,17 +108,19 @@ test.save_video=true
 
 ### 零样本泛化实验
 
-- small model
+- PandaSet，OmniScene 自训 small：
+
 ```bash
 python -m src.main +experiment=pandaset_112x200 \
 mode=test \
 model.encoder.upsample_factor=4 \
 model.encoder.lowest_feature_resolution=4 \
 checkpointing.pretrained_model=checkpoints/omniscene-112x200-depthsplat-small/checkpoints/epoch_0-step_100000.ckpt \
-output_dir=outputs/depthsplat-pandaset-112x200-small \
+output_dir=outputs/depthsplat-pandaset-112x200-small-omniscene/total/temporal18
 ```
 
-- base model
+- PandaSet，OmniScene 自训 base：
+
 ```bash
 python -m src.main +experiment=pandaset_112x200 \
 mode=test \
@@ -127,7 +129,31 @@ model.encoder.upsample_factor=2 \
 model.encoder.lowest_feature_resolution=4 \
 model.encoder.monodepth_vit_type=vitb \
 checkpointing.pretrained_model=checkpoints/omniscene-112x200-depthsplat-base/checkpoints/epoch_0-step_100000.ckpt \
-output_dir=outputs/depthsplat-pandaset-112x200-base \
+output_dir=outputs/depthsplat-pandaset-112x200-base-omniscene/total/temporal18
+```
+
+- DDAD，OmniScene 自训 small：
+
+```bash
+python -m src.main +experiment=ddad_112x200 \
+mode=test \
+model.encoder.upsample_factor=4 \
+model.encoder.lowest_feature_resolution=4 \
+checkpointing.pretrained_model=checkpoints/omniscene-112x200-depthsplat-small/checkpoints/epoch_0-step_100000.ckpt \
+output_dir=outputs/depthsplat-ddad-112x200-small-omniscene/total/temporal18
+```
+
+- DDAD，OmniScene 自训 base：
+
+```bash
+python -m src.main +experiment=ddad_112x200 \
+mode=test \
+model.encoder.num_scales=2 \
+model.encoder.upsample_factor=2 \
+model.encoder.lowest_feature_resolution=4 \
+model.encoder.monodepth_vit_type=vitb \
+checkpointing.pretrained_model=checkpoints/omniscene-112x200-depthsplat-base/checkpoints/epoch_0-step_100000.ckpt \
+output_dir=outputs/depthsplat-ddad-112x200-base-omniscene/total/temporal18
 ```
 
 ---
@@ -574,5 +600,3 @@ We fine-tune our Gaussian Splatting pre-trained depth model using ground-truth d
 ## Acknowledgements
 
 This project is developed with several fantastic repos: [pixelSplat](https://github.com/dcharatan/pixelsplat), [MVSplat](https://github.com/donydchen/mvsplat), [MVSplat360](https://github.com/donydchen/mvsplat360), [UniMatch](https://github.com/autonomousvision/unimatch), [Depth Anything V2](https://github.com/DepthAnything/Depth-Anything-V2) and [DL3DV](https://github.com/DL3DV-10K/Dataset). We thank the original authors for their excellent work.
-
-

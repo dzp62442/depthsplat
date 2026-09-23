@@ -1,8 +1,8 @@
 defaults:
   - view_sampler: all
 
-name: pandaset
-roots: [datasets/PandaSet]
+name: ddad
+roots: [datasets/DDAD]
 processed_root: null
 test_split: total
 make_baseline_1: false

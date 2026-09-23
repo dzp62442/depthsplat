@@ -73,6 +73,9 @@ def train(cfg_dict: DictConfig):
 
     cfg = load_typed_root_config(cfg_dict)
     set_cfg(cfg_dict)
+    temporal_test = cfg.mode == "test" and cfg.dataset.name in ("pandaset", "ddad")
+    if temporal_test and torch.cuda.device_count() > 1:
+        raise ValueError("Temporal18 evaluation requires one GPU; set CUDA_VISIBLE_DEVICES=0")
 
     # Set up the output directory.
     if cfg_dict.output_dir is None:
@@ -107,7 +110,9 @@ def train(cfg_dict: DictConfig):
         if wandb.run is not None:
             wandb.run.log_code("src")
     else:
-        logger = LocalLogger()
+        # LocalLogger deletes outputs/local on construction. Zero-shot tests only
+        # write under the caller's explicit output_dir, including temporary smokes.
+        logger = False if temporal_test else LocalLogger()
 
     # Set up checkpointing.
     callbacks.append(
@@ -266,6 +271,12 @@ def train(cfg_dict: DictConfig):
                 )
             )
             
+        if temporal_test:
+            from src.evaluation.zero_shot import checkpoint_metadata
+            actual_checkpoint = checkpoint_path or cfg.checkpointing.pretrained_model
+            if actual_checkpoint is None or cfg.checkpointing.pretrained_depth is not None:
+                raise ValueError("Temporal18 tests require a full pretrained_model or Lightning checkpoint")
+            model_wrapper.checkpoint_provenance = checkpoint_metadata(actual_checkpoint, strict_load)
         trainer.test(
             model_wrapper,
             datamodule=data_module,
