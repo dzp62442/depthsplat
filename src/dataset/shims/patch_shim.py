@@ -29,6 +29,9 @@ def apply_patch_shim_to_views(views: BatchedViews, patch_size: int) -> BatchedVi
     if "masks" in views:
         updated["masks"] = views["masks"][:, :, row : row + h_new, col : col + w_new]
 
+    if "eval_mask" in views:
+        updated["eval_mask"] = views["eval_mask"][:, :, row : row + h_new, col : col + w_new]
+
     if "rel_depth" in views:
         updated["rel_depth"] = views["rel_depth"][
             :, :, row : row + h_new, col : col + w_new

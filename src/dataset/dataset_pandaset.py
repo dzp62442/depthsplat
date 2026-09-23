@@ -75,6 +75,7 @@ class DatasetPandaSet(Dataset):
 
     def evaluation_metadata(self):
         return dict(dataset="pandaset", schema=self.manifest["schema"],
+                    pixel_protocol="full_image", mask_manifest_sha256="",
                     split=self.cfg.test_split if self.stage == "test" else self.stage,
                     processed_root=str(self.processed_root.resolve()), num_bins=len(self),
                     bin_tokens=list(self.bin_tokens), selection_sha256=self.manifest["selection_sha256"],

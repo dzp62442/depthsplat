@@ -22,6 +22,7 @@ class BatchedViews(TypedDict, total=False):
     index: Int64[Tensor, "batch _"]  # batch view
     masks: Bool[Tensor, "batch _ _ _"] | None  # batch view height width, optional bool mask
     rel_depth: Float[Tensor, "batch _ _ _"] | None  # batch view height width, optional relative depth
+    eval_mask: Bool[Tensor, "batch _ _ _"]  # evaluation-only valid pixels
 
 
 class BatchedExample(TypedDict, total=False):
@@ -30,6 +31,7 @@ class BatchedExample(TypedDict, total=False):
     scene: list[str]
     scene_id: list[str]
     evaluation_protocol: list[str]
+    eval_mask_manifest_sha256: list[str]
 
 
 class UnbatchedViews(TypedDict, total=False):
@@ -41,6 +43,7 @@ class UnbatchedViews(TypedDict, total=False):
     index: Int64[Tensor, " _"]
     masks: Bool[Tensor, "_ height width"] | None  # height width, optional bool mask
     rel_depth: Float[Tensor, "_ height width"] | None  # height width, optional relative depth
+    eval_mask: Bool[Tensor, "_ height width"]
 
 
 class UnbatchedExample(TypedDict, total=False):
@@ -49,6 +52,7 @@ class UnbatchedExample(TypedDict, total=False):
     scene: str
     scene_id: str
     evaluation_protocol: str
+    eval_mask_manifest_sha256: str
 
 
 # A data shim modifies the example after it's been returned from the data loader.

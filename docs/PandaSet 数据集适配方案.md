@@ -2,6 +2,8 @@
 
 更新日期：2026-09-23。状态：**六输入、十八目标视角加载与分组评估已实现；已完成全量 CPU 数据加载检查和小样本 GPU 验收，未启动本项目全量 GPU 实验。**
 
+DDAD 可选自车掩码已接入公共评估入口，**仅允许 DDAD 测试使用，不适用于 PandaSet**。本项目保留 PandaSet 原有全图加载、模型和评价口径。
+
 SVF-GS 的零样本泛化实验与协议文档已更新完成。本项目直接消费同一份已发布数据，不再生成数据。当前 PandaSet `processed/manifest_test.json` 为 `complete=true`，包含 264 个 bin。前馈方法正式口径为 `final/all_18` 的 PSNR/SSIM/LPIPS，其他组保留作诊断。
 
 并列数据集方案见 [DDAD 数据集适配方案](<DDAD 数据集适配方案.md>)。
@@ -127,6 +129,18 @@ PSNR/SSIM/LPIPS 一次计算十八个逐视角分数，再在每个 bin 内按�
 
 这些文件作为现有输出的补充。分组扩展限定在本次十八视角协议，原 OmniScene/RE10K 的调用和已有统计不应被无关改变。首轮用单 GPU、test batch size 1 验证，不把多卡评估改造混入本轮。
 
+### 4.1 DDAD 自车掩码升级的兼容边界
+
+详细规则见 [DDAD 方案第 5 节](<DDAD 数据集适配方案.md>)。与 SVF-GS 一致，novel_12 可选排除自车、input_6 保持全图；本项目只在 DDAD 接入独立 `target.eval_mask`，不向 PandaSet 提供模板、不改其 Dataset/工具架构，也不把 `target.masks` 或 `train.use_dynamic_mask` 改作自车评价开关。
+
+- 唯一用户参数 `test.eval_use_ego_mask=false`；PandaSet 必须保持关闭，误设 true 明确报错。关闭时不读取 DDAD 掩码资产，不增加 PandaSet 的数据依赖。
+- 公共 `metrics.py` 增加可选 masked 入口，但 `mask=None` 时逐视角 PSNR/SSIM/LPIPS/PCC 沿用原函数。逐视角全 1 时也走原 RGB 函数，不能把所有数据集统一切到 spatial LPIPS 或改变 SSIM 参数。
+- `patch_shim` 仅在 `eval_mask` 存在时同步裁剪；PandaSet 既有 RGB/K/masks/rel_depth 处理不变。保留实际 112×192 的尺寸记录，不借本轮升级调整模型预处理。
+- 公共 CSV/summary/provenance 已补充 `pixel_protocol`、`mask_manifest_sha256`。PandaSet 固定为 `full_image` 和空哈希；缺字段的历史记录只按全图解释。禁止把 DDAD masked 的 novel_12/all_18 与 full_image 或不同掩码版本作为同协议结果混合汇总。
+- 原目录和自动 Hydra 日志推导保持不变。新增目录后缀仅由 DDAD 掩码开关触发，不更改 PandaSet 启动命令。
+
+回归要求：相同 PandaSet bin/checkpoint 开关默认关闭时，输入/渲染及三组数值与本轮升级前一致；缺少掩码目录也能完成原全图加载。新增身份字段可以改变 JSON/CSV 结构，但不能改变原指标数值或样本覆盖。既有全图测试记录不作为新掩码路径已实现、已验收的证据。
+
 ## 5. 权重与运行接口
 
 自训 OmniScene checkpoint 和官方完整 GS 权重继续通过 `checkpointing.pretrained_model` 选择，保留严格加载。small/base/large 使用各自匹配的结构参数；不新增自动查找或复制权重机制。
@@ -175,9 +189,9 @@ output_dir=outputs/depthsplat-pandaset-112x200-base-omniscene/total/temporal18
 历史六视角数据与新数据的抽样、预处理可能不同，不能把新 input_6 与旧结果的差异归因于“只增加了目标视角”。
 
 
-### 本轮验证记录
+### 既有全图路径验证记录
 
-- CPU 回归使用标准库 unittest，无需安装 pytest；本轮 12 项测试全部通过，包含遍历 PandaSet 264、DDAD 324 个 bin，核对十八路 RGB/K/c2w/深度及末尾六路复用，CUDA 未初始化。
+- 此前全图开发验收使用标准库 unittest，无需安装 pytest；当时 12 项测试全部通过，包含遍历 PandaSet 264、DDAD 324 个 bin，核对十八路 RGB/K/c2w/深度及末尾六路复用，CUDA 未初始化。新增掩码功能的验收单列于 DDAD 文档，不以旧记录代替。
 - GPU 主验收使用两数据集各 2 个临时 bin：OmniScene 自训 base/small × PandaSet/DDAD 四种组合均严格加载并完成十八路推理。另已验证 PandaSet + 官方 RE10K base 兼容性，作为后续可选入口，不替代自训主实验。
 - DDAD 完整渲染与 chunk=6 对照：保存 PNG 逐文件一致，三组 RGB/PCC 指标差异小于 1e-6；每次输出 36 张渲染和 36 张 GT。
 - 原 scores_all_avg 与 final/all_18 对齐；清单、checkpoint 哈希及实际 112×192 尺寸已读回核对。预热后无计时样本时保存 null，不用两样本测试报告效率结论。

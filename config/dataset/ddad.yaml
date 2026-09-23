@@ -5,6 +5,7 @@ name: ddad
 roots: [datasets/DDAD]
 processed_root: null
 test_split: total
+eval_use_ego_mask: ${test.eval_use_ego_mask}
 make_baseline_1: false
 augment: true
 

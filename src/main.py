@@ -17,6 +17,7 @@ from pytorch_lightning.callbacks import (
 from pytorch_lightning.loggers.wandb import WandbLogger
 
 from pytorch_lightning.plugins.environments import LightningEnvironment
+from src.evaluation.ego_mask import validate_eval_mask_mode, resolve_eval_output_dir
 
 
 # Configure beartype and jaxtyping.
@@ -47,6 +48,12 @@ def cyan(text: str) -> str:
     config_name="main",
 )
 def train(cfg_dict: DictConfig):
+    validate_eval_mask_mode(cfg_dict.mode, cfg_dict.dataset.name, cfg_dict.test.eval_use_ego_mask)
+    if cfg_dict.dataset.name == "ddad" and cfg_dict.dataset.eval_use_ego_mask != cfg_dict.test.eval_use_ego_mask:
+        raise ValueError("Set only test.eval_use_ego_mask; the Dataset flag must match")
+    requested_output_dir = cfg_dict.output_dir
+    cfg_dict.output_dir = resolve_eval_output_dir(
+        requested_output_dir, cfg_dict.mode, cfg_dict.dataset.name, cfg_dict.test.eval_use_ego_mask)
     if cfg_dict["mode"] == "train" and cfg_dict["train"]["eval_model_every_n_val"] > 0:
         eval_cfg_dict = copy.deepcopy(cfg_dict)
         dataset_dir = str(cfg_dict["dataset"]["roots"]).lower()
@@ -173,6 +180,7 @@ def train(cfg_dict: DictConfig):
             None if eval_cfg is None else eval_cfg.dataset
         ),
     )
+    model_wrapper.requested_output_dir = requested_output_dir
 
     # 数据模块初始化
     print(cyan("Init Data Module"))

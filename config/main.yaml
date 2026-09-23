@@ -69,6 +69,7 @@ train:
   use_dynamic_mask: false
 
 test:
+  eval_use_ego_mask: false
   output_path: outputs/test
   compute_scores: true
   eval_time_skip_steps: 0

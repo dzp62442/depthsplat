@@ -22,8 +22,8 @@ import math
 from ..dataset.data_module import get_data_shim
 from ..dataset.types import BatchedExample
 from ..dataset import DatasetCfg
-from ..evaluation.metrics import compute_lpips, compute_pcc, compute_psnr, compute_ssim
-from ..evaluation.zero_shot import view_group_records, write_zero_shot_results
+from ..evaluation.metrics import compute_lpips, compute_pcc, compute_psnr, compute_ssim, compute_image_metrics
+from ..evaluation.zero_shot import view_group_records, write_zero_shot_results, check_existing_pixel_identity
 from ..global_cfg import get_cfg
 from ..loss import Loss
 from ..misc.benchmarker import Benchmarker
@@ -76,6 +76,7 @@ class TestCfg:
     render_chunk_size: int | None
     stablize_camera: bool
     stab_camera_kernel: int
+    eval_use_ego_mask: bool = False
 
 
 @dataclass
@@ -378,12 +379,24 @@ class ModelWrapper(LightningModule):
                 raise ValueError("Temporal18 evaluation requires GS rendering at the indexed target cameras")
             self.zero_shot_metadata = dataset.evaluation_metadata()
             self.zero_shot_metadata["checkpoint"] = self.checkpoint_provenance
+            self.zero_shot_metadata.setdefault("pixel_protocol", "full_image")
+            self.zero_shot_metadata.setdefault("mask_manifest_sha256", "")
+            enabled = getattr(self.test_cfg, "eval_use_ego_mask", False)
+            if enabled != ("eval_mask" in self.zero_shot_metadata):
+                raise ValueError("Dataset/test evaluation mask configuration mismatch")
+            self.zero_shot_metadata["requested_output_dir"] = getattr(self, "requested_output_dir", get_cfg()["output_dir"])
+            self.zero_shot_metadata["output_dir"] = get_cfg()["output_dir"]
+            out_dir = Path(get_cfg()["output_dir"]) / "metrics"
+            check_existing_pixel_identity(out_dir, self.zero_shot_metadata)
             if self.test_cfg.compute_scores:
-                out_dir = Path(get_cfg()["output_dir"]) / "metrics"
                 out_dir.mkdir(parents=True, exist_ok=True)
+                with (out_dir / "data_provenance.json").open("w") as handle:
+                    json.dump(self.zero_shot_metadata, handle, indent=2, allow_nan=False)
                 # A failed rerun must not leave an old "complete" summary in place.
                 with (out_dir / "evaluation_summary.json").open("w") as handle:
                     json.dump({"complete": False, "status": "running",
+                               "pixel_protocol": self.zero_shot_metadata["pixel_protocol"],
+                               "mask_manifest_sha256": self.zero_shot_metadata["mask_manifest_sha256"],
                                "expected_bins": len(dataset)}, handle)
 
     def test_step(self, batch, batch_idx):
@@ -397,6 +410,14 @@ class ModelWrapper(LightningModule):
             previous = self.zero_shot_metadata.setdefault("actual_image_shape", actual_shape)
             if previous != actual_shape:
                 raise ValueError("Image shape changed during evaluation")
+            enabled = getattr(self.test_cfg, "eval_use_ego_mask", False)
+            if enabled != ("eval_mask" in batch["target"]):
+                raise ValueError("Missing/unexpected evaluation mask in batch")
+            if enabled:
+                mask = batch["target"]["eval_mask"]
+                if (mask.shape != (b, v, h, w) or not mask[:, 12:].all() or
+                        batch.get("eval_mask_manifest_sha256") != [self.zero_shot_metadata["mask_manifest_sha256"]]):
+                    raise ValueError("Evaluation mask shape/input-view/manifest mismatch")
 
         pred_depths = None
 
@@ -667,16 +688,17 @@ class ModelWrapper(LightningModule):
                 if f"lpips" not in self.test_step_outputs:
                     self.test_step_outputs[f"lpips"] = []
 
-                image_metrics = {
-                    "psnr": compute_psnr(rgb_gt, rgb),
-                    "ssim": compute_ssim(rgb_gt, rgb),
-                    "lpips": compute_lpips(rgb_gt, rgb),
-                }
+                eval_mask = batch["target"].get("eval_mask")
+                eval_mask = None if eval_mask is None else eval_mask[0]
+                mask_metadata = {} if self.zero_shot_metadata is None else self.zero_shot_metadata.get("eval_mask", {})
+                mask_cfg = mask_metadata.get("settings")
+                image_metrics = compute_image_metrics(rgb_gt, rgb, eval_mask, mask_cfg)
                 if self.zero_shot_metadata is not None:
                     records = view_group_records(
                         scene, batch["scene_id"][0], image_metrics,
                         batch["target"]["rel_depth"][0],
-                        None if output.depth is None else output.depth[0])
+                        None if output.depth is None else output.depth[0], eval_mask, mask_cfg,
+                        mask_metadata.get("mask_manifest_sha256"))
                     self.zero_shot_records.extend(records)
                     for name in ("psnr", "ssim", "lpips", "pcc"):
                         self.test_step_outputs.setdefault(name, []).append(records[0][name])
@@ -699,7 +721,9 @@ class ModelWrapper(LightningModule):
         if self.test_cfg.compute_scores:
             if self.zero_shot_metadata is not None:
                 summary = write_zero_shot_results(out_dir, self.zero_shot_records, self.zero_shot_metadata)
-                print("Primary result: final/all_18", summary["final/all_18"])
+                primary = summary["final/all_18"]
+                print("Primary result: final/all_18", {key: primary[key] for key in
+                      ("num_bins", "complete", "pixel_protocol", "psnr", "ssim", "lpips", "pcc")})
             self.benchmarker.dump_memory(out_dir / "peak_memory.json")
             self.benchmarker.dump(out_dir / "benchmark.json")
 
