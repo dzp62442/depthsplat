@@ -165,11 +165,48 @@ class MaskLoaderTests(unittest.TestCase):
 
 
 class MaskConfigTests(unittest.TestCase):
+    def test_dataset_and_mode_defaults_with_explicit_override(self):
+        for experiment in ("ddad_112x200", "ddad_224x400", "pandaset_112x200",
+                           "pandaset_224x400", "omniscene_112x200", "re10k"):
+            for mode in ("test", "train"):
+                with self.subTest(experiment=experiment, mode=mode):
+                    with initialize(version_base=None, config_path="../config"):
+                        raw = compose(config_name="main", overrides=[f"+experiment={experiment}", f"mode={mode}"])
+                    cfg = load_typed_root_config(raw)
+                    expected = mode == "test" and experiment.startswith("ddad_")
+                    self.assertEqual(cfg.test.eval_use_ego_mask, expected)
+                    if cfg.dataset.name == "ddad":
+                        self.assertEqual(cfg.dataset.eval_use_ego_mask, expected)
+        for resolution in ("112x200", "224x400"):
+            with initialize(version_base=None, config_path="../config"):
+                raw = compose(config_name="main", return_hydra_config=True, overrides=[
+                    f"+experiment=ddad_{resolution}", "mode=test", "test.eval_use_ego_mask=false",
+                    "output_dir=/tmp/unmasked-eval"])
+            self.assertFalse(raw.test.eval_use_ego_mask)
+            self.assertFalse(raw.dataset.eval_use_ego_mask)
+            self.assertEqual(raw.hydra.run.dir, "/tmp/unmasked-eval/logs/hydra")
+
+    def test_default_loads_mask_and_false_disables_it(self):
+        with tempfile.TemporaryDirectory(prefix="depthsplat-default-mask-") as temp:
+            root = Path(temp)
+            mask_fixture(root)
+            with initialize(version_base=None, config_path="../config"):
+                raw = compose(config_name="main", overrides=[
+                    "+experiment=ddad_112x200", "mode=test", f"dataset.processed_root={root}"])
+            enabled = get_dataset(load_typed_root_config(raw).dataset, "test", None)[0]
+            raw.test.eval_use_ego_mask = False
+            disabled = get_dataset(load_typed_root_config(raw).dataset, "test", None)[0]
+            self.assertIn("eval_mask", enabled["target"])
+            self.assertNotIn("eval_mask", disabled["target"])
+            for side in ("context", "target"):
+                for key, value in disabled[side].items():
+                    self.assertTrue(torch.equal(enabled[side][key], value))
+
     def test_routing_and_mode_validation(self):
         for resolution in ("112x200", "224x400"):
             with initialize(version_base=None, config_path="../config"):
                 raw = compose(config_name="main", return_hydra_config=True, overrides=[
-                    f"+experiment=ddad_{resolution}", "mode=test", "test.eval_use_ego_mask=true",
+                    f"+experiment=ddad_{resolution}", "mode=test",
                     "output_dir=/tmp/masked-eval"])
             self.assertEqual(raw.hydra.run.dir, "/tmp/masked-eval_ego_novel12_v1/logs/hydra")
             self.assertTrue(config(enabled=True, resolution=resolution).dataset.eval_use_ego_mask)
@@ -190,7 +227,7 @@ def run(cfg):
 run()
 '''
             command = [sys.executable, "-B", "-c", code, "+experiment=ddad_112x200", "mode=test",
-                       "test.eval_use_ego_mask=true", f"output_dir={temp}/run"]
+                       f"output_dir={temp}/run"]
             subprocess.run(command, cwd=project, check=True, capture_output=True, text=True, timeout=30)
             self.assertTrue((Path(temp) / "run_ego_novel12_v1/logs/hydra/.hydra/config.yaml").is_file())
             self.assertFalse((Path(temp) / "run").exists())

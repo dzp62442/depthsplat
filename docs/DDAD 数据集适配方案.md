@@ -1,12 +1,12 @@
 # DDAD 数据集适配方案（DepthSplat / comp_svfgs）
 
-更新日期：2026-09-23。状态：**DDAD 全图及可选自车遮挡掩码评估已实现。** 掩码指标已与 SVF-GS 做 CPU 数值对照，并完成自训 small/base 各两样本的 GPU 开关对照；本轮未启动全量 GPU 实验。
+更新日期：2026-10-01。状态：**DDAD 全图及可选自车遮挡掩码评估已实现，加载边界已补齐与 OmniScene/nuScenes 的公共坐标轴对齐。** 下文此前的掩码 CPU/GPU 验收记录不代表坐标修正后的质量结果；修正后的正式评估由用户沿用原指令和实验名称重跑。
 
 SVF-GS 的零样本泛化实验与协议文档已更新完成。本项目读取同一份已发布 DDAD 十八视角数据，当前 `processed/manifest_test.json` 为 `complete=true`、`num_bins=324`。前馈方法正式口径为 `final/all_18` 的 PSNR/SSIM/LPIPS。
 
 本方案与 [PandaSet 数据集适配方案](<PandaSet 数据集适配方案.md>) 并列，沿用其原有适配方式，不通过抽取共享 Dataset 基类改造 PandaSet。
 
-本次对照 SVF-GS 提交 `af39b31d984ba128020282764265fa38d31ce767` 的文档、加载器、指标和汇总代码。目标是可选排除 novel_12 中模板标记的自车区域，**不改变模型推理或输入视角评价，也不保证分数必然提高**。
+自车掩码适配对照 SVF-GS 提交 `af39b31d984ba128020282764265fa38d31ce767` 的文档、加载器、指标和汇总代码。掩码开关只可选排除 novel_12 中模板标记的自车区域，**不改变模型推理或输入视角评价，也不保证分数必然提高**。公共坐标轴修正独立于掩码开关，对 DDAD 所有输入、目标相机统一生效。
 
 ## 1. 目标与架构边界
 
@@ -91,11 +91,30 @@ T_center_lidar_from_camera(t,k)
     = inverse(T_world_from_lidar(center)) @ T_world_from_camera(t,k)
 ```
 
-DepthSplat 直接以该 `sensor2lidar_transform` 作为 OpenCV c2w，不加 `flip_yz`，不以静态标定外参重算，不把前后时刻分别归一化到自身 LiDAR。上述变换适用于三时刻全部图像。
+预处理的中央 LiDAR 坐标为 `+X 前 / +Y 左 / +Z 上`，而 OmniScene/nuScenes 训练使用 `+X 右 / +Y 前 / +Z 上`。此前直接透传 `sensor2lidar_transform` 遗漏了这一步公共坐标对齐；相对位姿和投影正确并不能证明公共坐标方向与训练一致。
+
+现在仅在 `utils_ddad.load_info` 的加载边界转换，三时刻全部相机共用同一个左乘矩阵：
+
+```text
+A = [[0, -1, 0, 0],
+     [1,  0, 0, 0],
+     [0,  0, 1, 0],
+     [0,  0, 0, 1]]
+c2w_model = A @ sensor2lidar_transform
+R_model = A[:3, :3] @ R_reference
+t_model = A[:3, :3] @ t_reference
+w2c_row = inverse(c2w_model).T
+```
+
+即 `[x,y,z] → [-y,x,z]`，同时转换旋转和平移，保留中央 LiDAR 原点与米制尺度。六路输入、十二路 novel 目标均只转换一次，目标末尾六路继续复用已转换的输入。train/val/test 使用同一规则，无新增开关。保持 OpenCV 相机局部坐标，不加 `flip_yz`，不以静态标定外参重算，也不把前后时刻分别归一化到自身 LiDAR。
+
+逆位姿从修正后的 c2w 重新计算，不使用旧坐标的派生量；原下游通过 c2w 计算相机中心、世界射线、高斯均值/协方差及渲染 view matrix，无需修改模型或渲染器。相机相对位姿、相机间距离、重投影、RGB/K/深度/掩码、near/far、视角顺序和分组评估定义均不变。共享预处理资产及其他数据集不修改，不处理模型原有 bug，也不据此预先断言指标提高。
+
+`data_provenance.json` 新增 `camera_frame=nuscenes_axes_x_right_y_forward_z_up` 和 `reference_to_model` 矩阵，仅记录加载坐标约定；原 schema、selection 身份、掩码协议、Hydra 路径及实验名称不变。用户删除旧 DDAD 结果后可用原指令重跑，全图与掩码版本均须重新评估，不能把旧坐标结果混入修正后的比较。本次修复不自动删除或改写旧结果。
 
 逐图读取处理后的 224×400 RGB 和对应 K；需要 112×200 时按现有 PandaSet 方式同步缩放，再按宽高归一化 K。只在本项目做必要的 resize/既有 patch shim，不重做主点居中裁剪、去畸变或深度尺度校正。
 
-Metric3D 深度用于 PCC，不作为编码器额外输入；无需向模型注入置信度。默认 RGB 指标保持全图，原 `target.masks` 仍为全 1 占位，不声称实际场景没有动态物体。新增自车掩码使用独立 `target.eval_mask`，不替换该字段，具体规则见第 5.1 节。
+Metric3D 深度用于 PCC，不作为编码器额外输入；无需向模型注入置信度。DDAD 测试默认在 novel_12 指标计算中排除自车遮挡，input_6 保持全图；可显式关闭掩码进行全图评估。原 `target.masks` 仍为全 1 占位，不声称实际场景没有动态物体。自车掩码使用独立 `target.eval_mask`，不替换该字段，具体规则见第 5.1 节。
 
 默认 patch shim 的有效块大小为 16，`112×200` 实际裁成 `112×192`，`224×400` 不裁剪。记录实际尺寸，并保持 RGB/K/参考深度对齐；不能把配置名当作与 SVF-GS 指标视域完全一致的证据。本轮不因接入 DDAD 而改变已有模型预处理。
 
@@ -154,10 +173,10 @@ PSNR/SSIM/LPIPS 逐视角计算后组内平均，再按 bin 等权汇总。PCC �
 
 #### 开关与最小接入
 
-唯一用户开关为 `test.eval_use_ego_mask=false`，位置沿用 DepthSplat 的 `test.*` 配置习惯，对应 SVF-GS 的顶层 `eval_use_ego_mask`，不是直接复制其命令。协议参数和输出目录解析集中在 `src/evaluation/ego_mask.py`。
+唯一用户开关为 `test.eval_use_ego_mask`，DDAD 的 `mode=test` 默认 true，显式覆写 `test.eval_use_ego_mask=false` 可关闭。默认值由 mode/dataset 推导，其他数据集及训练默认 false；显式 true/false 优先于默认值。位置沿用 DepthSplat 的 `test.*` 配置习惯，对应 SVF-GS 的顶层 `eval_use_ego_mask`，不是直接复制其命令。默认值、协议参数和输出目录解析集中在 `src/evaluation/ego_mask.py`。
 
 - 在 `TestCfg` 声明布尔值；DDAD Dataset 的内部同名字段由 `${test.eval_use_ego_mask}` 插值传入，用户不重复指定。`src/main.py` 开始测试前校验：开启只允许 `mode=test`、`dataset.name=ddad`；Dataset 也只允许 test Stage。PandaSet、OmniScene、训练及训练期验证误用时明确报错。
-- 默认关闭时不读取掩码 manifest/PNG，不要求掩码目录存在，不构建 spatial LPIPS，保留原全图数值和输出路径。它与 `train.use_dynamic_mask`、深度置信度或有效性掩码无关。
+- 显式关闭时不读取掩码 manifest/PNG，不要求掩码目录存在，不构建 spatial LPIPS，保留原全图数值和输出路径。它与 `train.use_dynamic_mask`、深度置信度或有效性掩码无关。
 - 在原 `dataset_ddad.py/utils_ddad.py` 内接入加载，不改 DataModule 接口，不抽取共享 Dataset 基类，不把 PandaSet 的工具改造成通用框架。可在 DDAD 工具内封装轻量加载器，按 worker、mask_id 和加载分辨率缓存二值张量；不创建磁盘缓存。
 - 只新增 `target.eval_mask`：未 batch 为布尔 `(18,H,W)`，batch 后为 `(B,18,H,W)`。前 12 张按照第 3.1 节的目标相机次序取共享掩码，后 6 张**始终为全 1**；前相机的两个 novel 目标也为全 1。顶层可携带 `eval_mask_manifest_sha256`，与 Dataset 的 evaluation metadata 交叉核对。
 - 掩码仅进入 `ModelWrapper.test_step` 的指标计算。编码器输入、目标相机、生成高斯、RGB/深度渲染、训练损失和保存的渲染图全部不变；不把 target GT 填充值送入模型或写回渲染张量。
@@ -231,9 +250,9 @@ output_dir=outputs/depthsplat-ddad-112x200-base-omniscene/total/temporal18
 
 后续如需官方 RE10K base，保留 base 结构参数，checkpoint 改为 `pretrained/depthsplat-gs-base-re10k-256x256-view2-ca7b6795.pth`，输出目录中的来源改为 `base-re10k`。无需改代码；官方两视角训练和当前六输入推理需明确区分。
 
-默认 `dataset.test_split=total`，Hydra 日志自动写入 `${output_dir}/logs/hydra`。首轮使用单 GPU、test batch size 1；临时验收把数据根目录、output_dir 和重定向的进程日志指向 /tmp，不写入正式数据和历史实验目录。
+默认 `dataset.test_split=total`，Hydra 日志自动写入最终输出目录下的 `logs/hydra`。首轮使用单 GPU、test batch size 1；临时验收把数据根目录、output_dir 和重定向的进程日志指向 /tmp，不写入正式数据和历史实验目录。
 
-**启用掩码：** 上述 DDAD base/small 命令仅增加 `test.eval_use_ego_mask=true`。完整十八路仍然渲染，total 仍覆盖 324 个 bin；关闭时省略该参数。输出目录后缀及 Hydra 日志按第 5.2 节自动推导，不要求用户再写 `hydra.run.dir`。PandaSet 命令不增加此参数。
+**默认启用掩码：** 上述 DDAD base/small 命令无需增加参数。完整十八路仍然渲染，total 仍覆盖 324 个 bin；全图评估增加 `test.eval_use_ego_mask=false`。默认输出到 `temporal18_ego_novel12_v1`，显式关闭后输出到 `temporal18`；后缀及 Hydra 日志按第 5.2 节自动推导，不要求用户再写 `hydra.run.dir`。PandaSet 默认保持全图，命令不增加此参数。
 
 ## 7. 实施与验收
 
@@ -263,7 +282,7 @@ output_dir=outputs/depthsplat-ddad-112x200-base-omniscene/total/temporal18
 | `src/evaluation/ego_mask.py`、`src/config.py` | 单一协议配置和 Hydra resolver；类型化配置解析内部布尔插值 |
 | `tests/test_zero_shot.py`、`tests/test_ego_mask.py` | 加载、指标对照、关闭回归和目录自动推导测试 |
 
-1. **配置隔离**：默认关闭且掩码目录不存在仍可加载；PandaSet/OmniScene/训练误用开关报错；small/base 和 112×200/224×400 配置均能组合；保持严格权重加载，未涉及模型参数。
+1. **配置隔离**：DDAD 测试默认开启；显式关闭且掩码目录不存在仍可加载。PandaSet/OmniScene/训练默认关闭，误开开关报错；small/base 和 112×200/224×400 配置均能组合；保持严格权重加载，未涉及模型参数。
 2. **资产与几何**：覆盖正式 324 个 bin 的场景/相机引用，特别是四组完整标定；缺文件、错误 scene/camera/K/A、篡改哈希、空 mask 均失败。检查前 12 路过去/未来映射、后 6 路全 1，以及 nearest 后再 patch crop 的逐像素结果。
 3. **跨仓库指标一致性**：以固定、相同的 GT/pred/depth/mask 张量，在最终 112×192 和不裁剪的 224×400 上分别对照 SVF-GS 两个指标入口。使用真实 VGG LPIPS（不能只用 mock），同设备/依赖下以 `rtol=1e-5, atol=1e-6` 为验收阈值；失败时查明数值或定义差异，不能直接放宽。参考结果可离线导出，生产运行不引入 SVF-GS 依赖。
 4. **指标性质**：关闭与全 1 回归原函数；只改变无效区预测不改变 masked PSNR/SSIM/LPIPS/PCC，改变有效区可改变分数；独立核对有效 MSE 分母、SSIM 窗口腐蚀、LPIPS GT 填充和 PCC 有效集合。验证不同掩码面积下仍是视角/bin 等权平均及完整/分块渲染的顺序一致。
@@ -279,8 +298,17 @@ output_dir=outputs/depthsplat-ddad-112x200-base-omniscene/total/temporal18
 - GPU 只选同一正式清单中两个 bin，自训 small/base 各进行关闭和开启对照。两种规模的高斯、十八路原始 RGB/深度张量哈希、保存 PNG 和 input_6 四项指标完全一致；small 对照同时覆盖完整渲染与 chunk=6。各次三组记录完整，旧整体 JSON 与 final/all_18 一致。
 - 全部调试产物和日志位于 `/tmp/depthsplat-ego-smoke-nLRnP0/`，provenance 标注 `development_bin_limit=2`；这些是功能验收，不代表正式质量结果或效率测量。目录后缀及 Hydra 日志由开关自动推导，没有在命令行重复指定。
 
+### 2026-10-01 公共坐标修正验收
+
+- 新增 `tests/test_ddad_coordinates.py`：覆盖非单位旋转及非零平移、行向量 w2c 一致性、原始记录不被修改、train/val/test、掩码开/关，以及全部输入/目标的统一变换与末尾六路复用。
+- 合成样本验证相对位姿、距离、世界射线和跨相机重投影；除外参外，RGB、K、参考深度、掩码、near/far 和索引逐项不变。重复加载不会累积旋转。
+- 正式 DDAD 全部 324 bins、5832 个相机位姿通过变换及逆位姿/相对位姿检查；另完成 PandaSet 264 bins 和 DDAD 324 bins 的完整 CPU 加载回归，以及 DDAD 掩码引用检查。
+- 使用 `PYTHONNOUSERSITE=1 CUDA_VISIBLE_DEVICES='' DEPTHSPLAT_REAL_DATA=1` 运行现有及新增 unittest：共 27 项，26 项通过，1 项可选 SVF-GS 指标对照未启用。临时测试资产仅写入 `/tmp`。
+- 未改动模型、渲染器、评估实现或配置，未重跑 GPU 实验，未删除旧结果；后续质量变化以用户重新评估为准。
+
 ## 8. 对照来源
 
 - 本项目 [PandaSet 方案](<PandaSet 数据集适配方案.md>) 及现有 `dataset_pandaset.py/utils_pandaset.py`，作为架构模板。
 - SVF-GS：`../SVF-GS/docs/零样本泛化实验/DDAD 数据集适配方案.md` 和同目录的十八视角规划（路径相对本项目根目录）。
 - SVF-GS 实现：`configs/build_config.py::build_zero_shot_config/build_eval_mask_config`、`data/temporal_dataset.py`、`data/transforms/ego_mask.py::DDADEgoMasks`、`tools/temporal_data.py::centered_crop`、`tools/metrics.py::compute_image_metrics/compute_eval_pcc`、`tools/ablation_metrics.py`、`tools/ablation_results.py`、`tools/ablation_analysis.py` 及 `tests/test_ego_mask_evaluation.py`。对齐发布资产与指标契约，保留 DepthSplat 自身的 OpenCV 相机约定。
+- 公共坐标修正：`../VolSplat/src/dataset/dataset_ddad.py` 和 `../VolSplat/docs/PandaSet与DDAD使用说明.md`；同时只读检查本项目真实 OmniScene 训练样本及 DDAD 预处理样本的六路相机光轴，确认训练前向为 +Y、DDAD 原前向为 +X。无跨仓库运行时依赖。

@@ -175,7 +175,7 @@ class DatasetOmniScene(Dataset):
         elif stage == "test":
             # for evaluation
             self.bin_tokens = json.load(open(osp.join(self.data_root, self.data_version, "bins_val_3.2m.json")))["bins"]
-            self.bin_tokens = self.bin_tokens[0::14][:2048]  # 每隔 14 个取一个，取 2048 个
+            # self.bin_tokens = self.bin_tokens[0::14][:2048]  # 每隔 14 个取一个，取 2048 个
         
     def __len__(self):
         return len(self.bin_tokens)

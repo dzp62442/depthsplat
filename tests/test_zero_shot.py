@@ -34,14 +34,16 @@ def write_json(path, value):
 
 
 def make_cfg(name, root=None, split="total", resolution="112x200"):
-    overrides = [f"+experiment={name}_{resolution}", "mode=test", f"dataset.test_split={split}"]
+    # These fixtures exercise full-image loading and do not publish ego masks.
+    overrides = [f"+experiment={name}_{resolution}", "mode=test", f"dataset.test_split={split}",
+                 "test.eval_use_ego_mask=false"]
     if root is not None:
         overrides.append(f"dataset.processed_root={root}")
     with initialize(version_base=None, config_path="../config"):
         return load_typed_root_config(compose(config_name="main", overrides=overrides))
 
 
-def fixture(root, name):
+def fixture(root, name, split="test"):
     cls = getattr(importlib.import_module(f"src.dataset.dataset_{name}"),
                   "DatasetPandaSet" if name == "pandaset" else "DatasetDDAD")
     schema = "svfgs_temporal18_v1"
@@ -49,7 +51,7 @@ def fixture(root, name):
     protocol = dict(schema=schema, dataset=name, camera_map=cls.camera_map,
                     camera_order=cls.camera_types, image_hw=[224, 400], depth_reference="metric3d_v2",
                     crop_method="principal_center_float_v1", depth_max_m=300.0)
-    selection = dict(schema=schema, dataset=name, split="test", protocol=protocol,
+    selection = dict(schema=schema, dataset=name, split=split, protocol=protocol,
                      bins=[dict(bin_token=t) for t in tokens])
     sha = digest_bytes(json.dumps(selection, sort_keys=True, allow_nan=False, separators=(",", ":")).encode())
     selection["selection_sha256"] = sha
@@ -90,9 +92,9 @@ def fixture(root, name):
         raw = pickle.dumps(info)
         pkl_path.write_bytes(raw)
         hashes[token] = digest_bytes(raw)
-    write_json(root / "selection_test.json", selection)
-    write_json(root / "bins_test.json", dict(bins=tokens, selection_sha256=sha))
-    write_json(root / "manifest_test.json", dict(schema=schema, dataset=name, complete=True,
+    write_json(root / f"selection_{split}.json", selection)
+    write_json(root / f"bins_{split}.json", dict(bins=tokens, selection_sha256=sha))
+    write_json(root / f"manifest_{split}.json", dict(schema=schema, dataset=name, complete=True,
                num_bins=2, selection_sha256=sha, protocol=protocol, depth_model=model, bin_info_sha256=hashes))
 
 
@@ -118,7 +120,10 @@ class DatasetTests(unittest.TestCase):
                 torch.testing.assert_close(data["target"][key][12:], data["context"][key], rtol=0, atol=0)
             # Each camera's past/future, followed by all centers.
             expected_roles = [1, 2] * 6 + [0] * 6
-            self.assertEqual(data["target"]["extrinsics"][:, 1, 3].tolist(), expected_roles)
+            # Fixture roles occupy raw Y; DDAD maps raw Y to model -X.
+            role_positions = (-data["target"]["extrinsics"][:, 0, 3] if name == "ddad"
+                              else data["target"]["extrinsics"][:, 1, 3])
+            self.assertEqual(role_positions.tolist(), expected_roles)
             torch.testing.assert_close(data["context"]["intrinsics"][:, 0, 0],
                                        torch.arange(300, 306).float() / 400)
             self.assertTrue(torch.all(data["target"]["intrinsics"][:, :2, 2] == 0.5))
@@ -247,10 +252,11 @@ class ConfigTests(unittest.TestCase):
                         cfg = compose(config_name="main", return_hydra_config=True, overrides=[
                             f"+experiment={name}_{resolution}", "mode=test",
                             "output_dir=/tmp/depthsplat-config-test"])
-                    self.assertEqual(cfg.hydra.run.dir, "/tmp/depthsplat-config-test/logs/hydra")
+                    suffix = "_ego_novel12_v1" if name == "ddad" else ""
+                    self.assertEqual(cfg.hydra.run.dir, f"/tmp/depthsplat-config-test{suffix}/logs/hydra")
                     self.assertEqual(cfg.dataset.test_split, "total")
                     cfg.output_dir = "/tmp/depthsplat-config-test-another"
-                    self.assertEqual(cfg.hydra.run.dir, "/tmp/depthsplat-config-test-another/logs/hydra")
+                    self.assertEqual(cfg.hydra.run.dir, f"/tmp/depthsplat-config-test-another{suffix}/logs/hydra")
         for name in ("omniscene_112x200", "re10k"):
             with initialize(version_base=None, config_path="../config"):
                 cfg = compose(config_name="main", return_hydra_config=True,

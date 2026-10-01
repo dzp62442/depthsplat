@@ -1,4 +1,4 @@
-"""DDAD processed assets. Poses remain OpenCV c2w for DepthSplat."""
+"""DDAD assets with OpenCV cameras in the nuScenes-aligned reference frame."""
 
 import hashlib
 import json
@@ -13,6 +13,16 @@ import torch
 from ..evaluation.ego_mask import build_eval_mask_config
 
 SCHEMA = "svfgs_temporal18_v1"
+
+# DDAD's center-LiDAR frame is X forward, Y left, Z up. OmniScene/nuScenes
+# uses X right, Y forward, Z up: p_model = (-y_reference, x_reference, z).
+# This is a shared world-frame change, NOT an OpenCV camera-axis conversion.
+DDAD_REFERENCE_TO_MODEL = (
+    (0., -1., 0., 0.),
+    (1., 0., 0., 0.),
+    (0., 0., 1., 0.),
+    (0., 0., 0., 1.),
+)
 
 
 def centered_crop(intrinsic, source_hw, target_hw):
@@ -200,7 +210,7 @@ def load_bin_info(processed_root, token, manifest, camera_map):
 
 
 def load_info(info: dict, data_root: Path, processed_root: Path | None = None):
-    """Read an indexed image and its OpenCV camera-to-center-LiDAR pose."""
+    """Read an image and align its OpenCV c2w to the training reference axes."""
     root = Path(processed_root) if processed_root is not None else Path(data_root) / "processed"
     path = asset_path(root, info["data_path"])
     c2w = np.asarray(info["sensor2lidar_transform"], dtype=np.float32)
@@ -209,6 +219,9 @@ def load_info(info: dict, data_root: Path, processed_root: Path | None = None):
             not np.allclose(c2w[:3, :3].T @ c2w[:3, :3], np.eye(3), atol=1e-4) or
             not np.isclose(np.linalg.det(c2w[:3, :3]), 1, atol=1e-4)):
         raise ValueError(f"Invalid OpenCV c2w: {path}")
+    # Apply once to every central/novel camera, rotating BOTH R and t. Keep
+    # source records unchanged and derive w2c from the aligned pose, not raw R/t.
+    c2w = np.asarray(DDAD_REFERENCE_TO_MODEL, dtype=np.float32) @ c2w
     # Keep the existing row-vector w2c return convention; Dataset uses c2w.
     return str(path), c2w, np.linalg.inv(c2w).T.copy()
 

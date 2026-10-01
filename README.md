@@ -156,7 +156,7 @@ checkpointing.pretrained_model=checkpoints/omniscene-112x200-depthsplat-base/che
 output_dir=outputs/depthsplat-ddad-112x200-base-omniscene/total/temporal18
 ```
 
-DDAD 可加 `test.eval_use_ego_mask=true`，仅在 novel_12 评价时排除自车遮挡；默认关闭。开启后输出目录及 Hydra 日志自动隔离到带 `_ego_novel12_v1` 后缀的目录。
+DDAD 测试默认加载自车掩码，仅在 novel_12 评价时排除自车遮挡；输出目录及 Hydra 日志自动添加 `_ego_novel12_v1` 后缀。全图评估在上述命令末尾加 `test.eval_use_ego_mask=false`，输出到原 `temporal18` 目录。
 
 ---
 

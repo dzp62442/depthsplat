@@ -17,6 +17,11 @@ def build_eval_mask_config():
                 lpips_rule="gt_fill_invalid_spatial_valid_mean", pcc_rule="valid_group_flatten")
 
 
+def default_eval_use_ego_mask(mode, dataset):
+    # DDAD test defaults to masked metrics; training and other datasets do not.
+    return mode == "test" and dataset == "ddad"
+
+
 def validate_eval_mask_mode(mode, dataset, enabled):
     if not isinstance(enabled, bool):
         raise ValueError("test.eval_use_ego_mask must be boolean")
@@ -35,4 +40,5 @@ def resolve_eval_output_dir(output_dir, mode, dataset, enabled):
     return str(path if path.name.endswith(suffix) else path.with_name(path.name + suffix))
 
 
+OmegaConf.register_new_resolver("depthsplat_default_eval_ego_mask", default_eval_use_ego_mask, replace=True)
 OmegaConf.register_new_resolver("depthsplat_eval_output_dir", resolve_eval_output_dir, replace=True)

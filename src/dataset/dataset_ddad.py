@@ -13,7 +13,10 @@ import cv2
 from .types import Stage
 from .dataset import DatasetCfgCommon
 from .view_sampler import ViewSampler
-from .utils_ddad import load_info, load_conditions, load_manifest, load_bin_info, DDADEgoMasks
+from .utils_ddad import (
+    load_info, load_conditions, load_manifest, load_bin_info, DDADEgoMasks,
+    DDAD_REFERENCE_TO_MODEL,
+)
 
 cv2.setNumThreads(0)
 cv2.ocl.setUseOpenCL(False)
@@ -86,6 +89,8 @@ class DatasetDDAD(Dataset):
                     pcc_reference="metric3d_v2", configured_image_shape=list(self.reso),
                     input_views=6, output_views=18, rgb_resize="PIL bicubic", depth_resize="PIL bilinear")
         metadata.update(pixel_protocol="full_image", mask_manifest_sha256="")
+        metadata.update(camera_frame="nuscenes_axes_x_right_y_forward_z_up",
+                        reference_to_model=[list(row) for row in DDAD_REFERENCE_TO_MODEL])
         if self.ego_masks is not None:
             metadata["eval_mask"] = self.ego_masks.metadata()
             metadata["pixel_protocol"] = metadata["eval_mask"]["pixel_protocol"]
